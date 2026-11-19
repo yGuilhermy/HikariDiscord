@@ -46,8 +46,8 @@ To automate environment checking and dependency installation (including external
 1.  **Clone the Repository:**
 
     ```bash
-    git clone https://github.com/yGuilhermy/Hikari.git
-    cd Hikari
+    git clone https://github.com/yGuilhermy/HikariDiscord.git
+    cd HikariDiscord
     ```
 
 2.  **Install Modules (NPM):**

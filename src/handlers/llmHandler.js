@@ -1630,7 +1630,7 @@ async function generateResponse(prompt, channelId = null, options = {}) {
             }
         } catch (_) {}
     }
-    baseSystemPrompt += "\n[REGRAS DE CONTRATO E LIMITAÇÕES]:\n1) Você NÃO tem acesso a configurações internas do servidor, cargos, lista de membros, logs de auditoria ou regras específicas do servidor. Se o usuário perguntar sobre regras do servidor ou informações internas que você não tem como acessar, responda claramente dizendo 'eu não sei' ou que não tem acesso a essas informações.\n2) Seu projeto é de código aberto (open-source) e seu código-fonte/repositório oficial está disponível no GitHub em: https://github.com/yGuilhermy/Hikari. Se o usuário solicitar o link do seu código ou repositório, cite e forneça este link.\n3) Se encontrar 'Você (Hikari): erro da ia' ou 'assistant: erro da ia' no histórico, isso significa que sua resposta anterior falhou por erro técnico. Peça desculpas casualmente e pergunte o que o usuário deseja novamente.";
+    baseSystemPrompt += "\n[REGRAS DE CONTRATO E LIMITAÇÕES]:\n1) Você NÃO tem acesso a configurações internas do servidor, cargos, lista de membros, logs de auditoria ou regras específicas do servidor. Se o usuário perguntar sobre regras do servidor ou informações internas que você não tem como acessar, responda claramente dizendo 'eu não sei' ou que não tem acesso a essas informações.\n2) Seu projeto é de código aberto (open-source) e seu código-fonte/repositório oficial está disponível no GitHub em: https://github.com/yGuilhermy/HikariDiscord. Se o usuário solicitar o link do seu código ou repositório, cite e forneça este link.\n3) Se encontrar 'Você (Hikari): erro da ia' ou 'assistant: erro da ia' no histórico, isso significa que sua resposta anterior falhou por erro técnico. Peça desculpas casualmente e pergunte o que o usuário deseja novamente.";
     if (channelId) {
         const settings = channelSettings[channelId];
         const channelPersona = (typeof settings === 'string') ? settings : settings?.instruction;
@@ -2315,12 +2315,12 @@ Se você julga que isso é um erro grave do bot, você pode tentar apelar pelo b
 ---
 ✨ **Dica:** Deseja uma versão da **IA Hikari** totalmente aberta, sem filtros ou bloqueios de segurança?
 Você pode hospedar sua própria versão privada facilmente!
-🚀 **Hospede sua própria Hikari:** [Clique aqui para ver o GitHub](https://github.com/yGuilhermy/Hikari)`)
+🚀 **Hospede sua própria Hikari:** [Clique aqui para ver o GitHub](https://github.com/yGuilhermy/HikariDiscord)`)
                         .setFooter({ text: 'Hikari Security & Moderation • by yGuilhermy' })
                         .setTimestamp();
                     const githubButton = new ButtonBuilder()
                         .setLabel('Página do Projeto')
-                        .setURL('https://github.com/yGuilhermy/Hikari')
+                        .setURL('https://github.com/yGuilhermy/HikariDiscord')
                         .setStyle(ButtonStyle.Link)
                         .setEmoji('🚀');
                     const appealButton = new ButtonBuilder()
@@ -2354,7 +2354,7 @@ Se você acredita que isso é um erro, solicite um desbanimento pelo botão abai
 ---
 💡 **Quer usar a Hikari sem restrições?**
 Como o projeto é open-source, você pode hospedar sua própria versão e ter controle total!
-🚀 **Repositório:** [yGuilhermy/Hikari](https://github.com/yGuilhermy/Hikari)`)
+🚀 **Repositório:** [yGuilhermy/HikariDiscord](https://github.com/yGuilhermy/HikariDiscord)`)
                 .setFooter({ text: 'Hikari Security & Moderation • by yGuilhermy' })
                 .setTimestamp();
             const appealButton = new ButtonBuilder()
@@ -2363,7 +2363,7 @@ Como o projeto é open-source, você pode hospedar sua própria versão e ter co
                 .setStyle(ButtonStyle.Secondary);
             const githubButton = new ButtonBuilder()
                 .setLabel('Página do Projeto')
-                .setURL('https://github.com/yGuilhermy/Hikari')
+                .setURL('https://github.com/yGuilhermy/HikariDiscord')
                 .setStyle(ButtonStyle.Link)
                 .setEmoji('🚀');
             const banRow = new ActionRowBuilder().addComponents(appealButton, githubButton);
@@ -4080,12 +4080,12 @@ Responda APENAS com texto (NÃO USE JSON/TOOLS AGORA). Seja direto e informativo
                                 const banEmbed = new EmbedBuilder()
                                     .setColor(0xE11D48)
                                     .setTitle('🚨 DISPOSITIVO DE SEGURANÇA ACIONADO — VOCÊ FOI BANIDO!')
-                                    .setDescription(`🛑 **UM BLOQUEIO PERMANENTE E IMEDIATO FOI APLICADO.**\n\nO sistema de inteligência da Hikari analisou o contexto desta conversa e identificou uma conduta que viola gravemente os Termos de Uso.\n\n**DETALHES DO BANIMENTO:**\n- **ALVO PENALIZADO:** Seu perfil de usuário (Banido Globalmente)\n- **STATUS:** 🔴 TOTALMENTE BANIDO E BLOQUEADO.\n\nO acesso aos serviços foi completamente revogado. Qualquer nova tentativa de burlar a segurança agravará a punição.\n\nSe você julga que isso é um erro, utilize o botão de apelação abaixo.\n\n---\n✨ **Dica:** Quer a Hikari sem filtros? Hospede sua própria versão!\n🚀 **GitHub:** [yGuilhermy/Hikari](https://github.com/yGuilhermy/Hikari)`)
+                                    .setDescription(`🛑 **UM BLOQUEIO PERMANENTE E IMEDIATO FOI APLICADO.**\n\nO sistema de inteligência da Hikari analisou o contexto desta conversa e identificou uma conduta que viola gravemente os Termos de Uso.\n\n**DETALHES DO BANIMENTO:**\n- **ALVO PENALIZADO:** Seu perfil de usuário (Banido Globalmente)\n- **STATUS:** 🔴 TOTALMENTE BANIDO E BLOQUEADO.\n\nO acesso aos serviços foi completamente revogado. Qualquer nova tentativa de burlar a segurança agravará a punição.\n\nSe você julga que isso é um erro, utilize o botão de apelação abaixo.\n\n---\n✨ **Dica:** Quer a Hikari sem filtros? Hospede sua própria versão!\n🚀 **GitHub:** [yGuilhermy/HikariDiscord](https://github.com/yGuilhermy/HikariDiscord)`)
                                     .setFooter({ text: 'Hikari AI AutoMod • by yGuilhermy' })
                                     .setTimestamp();
                                 const githubButton = new ButtonBuilder()
                                     .setLabel('Página do Projeto')
-                                    .setURL('https://github.com/yGuilhermy/Hikari')
+                                    .setURL('https://github.com/yGuilhermy/HikariDiscord')
                                     .setStyle(ButtonStyle.Link)
                                     .setEmoji('🚀');
                                 const appealButton = new ButtonBuilder()

@@ -46,8 +46,8 @@ Para automatizar a verificação de ambiente e instalação de dependências (in
 1.  **Clone o Repositório:**
 
     ```bash
-    git clone https://github.com/yGuilhermy/Hikari.git
-    cd Hikari
+    git clone https://github.com/yGuilhermy/HikariDiscord.git
+    cd HikariDiscord
     ```
 
 2.  **Instalação de Módulos (NPM):**

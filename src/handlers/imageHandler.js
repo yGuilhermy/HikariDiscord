@@ -114,7 +114,7 @@ async function tryStableHorde(prompt, negativePrompt, width, height) {
         headers: {
             'Content-Type': 'application/json',
             'apikey': apiKey,
-            'Client-Agent': 'HikariBot:3.0:github.com/yguilhermy/Hikari',
+            'Client-Agent': 'HikariBot:3.0:github.com/yGuilhermy/HikariDiscord',
         },
         body: JSON.stringify({
             prompt: negativePrompt ? `${prompt} ### ${negativePrompt}` : prompt,

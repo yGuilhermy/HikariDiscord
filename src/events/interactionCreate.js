@@ -419,7 +419,7 @@ module.exports = {
                     .setStyle(ButtonStyle.Secondary);
                 const githubButton = new ButtonBuilder()
                     .setLabel('Página do Projeto')
-                    .setURL('https://github.com/yGuilhermy/Hikari')
+                    .setURL('https://github.com/yGuilhermy/HikariDiscord')
                     .setStyle(ButtonStyle.Link)
                     .setEmoji('🚀');
                 const banRow = new ActionRowBuilder().addComponents(appealButton, githubButton);

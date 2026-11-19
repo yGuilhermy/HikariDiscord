@@ -66,8 +66,8 @@ Se você prefere fazer tudo na mão (Ubuntu/Linux recomendado):
 1.  **Clone meu código**:
 
     ```bash
-    git clone https://github.com/yGuilhermy/Hikari.git
-    cd Hikari
+    git clone https://github.com/yGuilhermy/HikariDiscord.git
+    cd HikariDiscord
     ```
 
 2.  **Instale os módulos**:

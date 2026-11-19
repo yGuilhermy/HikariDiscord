@@ -281,7 +281,7 @@ function buildHelpHomePayload() {
     const embed = new EmbedBuilder()
         .setColor(0x7C3AED)
         .setTitle('✨ Central de Ajuda — Hikari AI')
-        .setDescription('Bem-vindo(a) ao hub de ajuda oficial da **Hikari**!\n\nEu sou uma Agente Autônoma multifuncional para o Discord, equipada com inteligência artificial generativa, assistente de voz em chamadas, download de multimídia, busca de jogos torrent, cotações em tempo real e moderação de segurança.\n\n📖 **[Guia Completo de Comandos](https://github.com/yGuilhermy/Hikari/blob/main/docs/content_pt/COMMANDS.md)**')
+        .setDescription('Bem-vindo(a) ao hub de ajuda oficial da **Hikari**!\n\nEu sou uma Agente Autônoma multifuncional para o Discord, equipada com inteligência artificial generativa, assistente de voz em chamadas, download de multimídia, busca de jogos torrent, cotações em tempo real e moderação de segurança.\n\n📖 **[Guia Completo de Comandos](https://github.com/yGuilhermy/HikariDiscord/blob/main/docs/content_pt/COMMANDS.md)**')
         .addFields(
             { name: '🤖 Comandos & Inspeção', value: 'Explore a lista completa de comandos e selecione qualquer um no menu para ver sua sintaxe e exemplos.', inline: true },
             { name: '⚙️ Configuração do Servidor', value: 'Administradores podem usar `/config_servidor` ou `/ia_ferramentas` para ajustar os recursos.', inline: true },
@@ -291,7 +291,7 @@ function buildHelpHomePayload() {
         .setTimestamp();
 
     const linkButtons = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setLabel('🚀 GitHub').setURL('https://github.com/yGuilhermy/Hikari').setStyle(ButtonStyle.Link),
+        new ButtonBuilder().setLabel('🚀 GitHub').setURL('https://github.com/yGuilhermy/HikariDiscord').setStyle(ButtonStyle.Link),
         new ButtonBuilder().setLabel('🌐 Redes Sociais').setURL('https://bio.site/yGuilhermy').setStyle(ButtonStyle.Link),
         new ButtonBuilder().setLabel('💖 Apoiar no LivePix').setURL('https://livepix.gg/yguilhermy').setStyle(ButtonStyle.Link)
     );
@@ -303,7 +303,7 @@ function buildHelpCommandListPayload() {
     const embed = new EmbedBuilder()
         .setColor(0x7C3AED)
         .setTitle('🤖 Lista Geral de Comandos')
-        .setDescription('Confira abaixo a lista completa de comandos da Hikari. Selecione qualquer comando no menu abaixo para abrir sua **inspeção técnica detalhada** com exemplos e opções!\n\n📖 **[Documentação Online](https://github.com/yGuilhermy/Hikari/blob/main/docs/content_pt/COMMANDS.md)**')
+        .setDescription('Confira abaixo a lista completa de comandos da Hikari. Selecione qualquer comando no menu abaixo para abrir sua **inspeção técnica detalhada** com exemplos e opções!\n\n📖 **[Documentação Online](https://github.com/yGuilhermy/HikariDiscord/blob/main/docs/content_pt/COMMANDS.md)**')
         .addFields(
             {
                 name: '🧠 Inteligência Artificial & Chat',
@@ -441,7 +441,7 @@ function buildHelpCreatorPayload() {
     const linkButtons = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setLabel('🌐 Redes Sociais do Criador').setURL('https://bio.site/yGuilhermy').setStyle(ButtonStyle.Link).setEmoji('🔗'),
         new ButtonBuilder().setLabel('💖 Apoiar no LivePix').setURL('https://livepix.gg/yguilhermy').setStyle(ButtonStyle.Link).setEmoji('🎁'),
-        new ButtonBuilder().setLabel('🚀 GitHub Open Source').setURL('https://github.com/yGuilhermy/Hikari').setStyle(ButtonStyle.Link).setEmoji('⭐')
+        new ButtonBuilder().setLabel('🚀 GitHub Open Source').setURL('https://github.com/yGuilhermy/HikariDiscord').setStyle(ButtonStyle.Link).setEmoji('⭐')
     );
 
     return { embeds: [embed], components: [getMainCategorySelectMenu('sobre'), linkButtons] };
