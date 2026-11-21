@@ -91,7 +91,7 @@ npx pm2 start index.js --name hikari
 
 ### 💡 Dicas de Especialista:
 
-- 💡 **Propagação Global:** No Discord v14+, comandos registrados via `rest.put` podem levar até 5 minutos para aparecer. Re-logar no cliente Discord força a atualização do cache UI.
+- **Comandos ausentes:** No Discord Developer Portal, confira se a aplicação pode usar os intents **Message Content**, **Server Members** e **Presence**, solicitados pelo cliente. Se os comandos Slash estiverem ausentes, confira a instalação com o escopo `applications.commands` e procure erros de registro no terminal.
 - 💡 **Permissões de Escrita:** Certifique-se de que o usuário que roda o script tem permissão total na pasta `src/data`, caso contrário, os filtros de busca e bancos de dados falharão silenciosamente.
 - 💡 **Proxy/VPN:** Se sua hospedagem for em Oracle Cloud ou AWS, você pode precisar de um agente de user-agent rotativo ou proxy para o comando `/baixar_musica` evitar bloqueios do YouTube.
 

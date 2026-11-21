@@ -98,3 +98,7 @@ npx pm2 start index.js --name hikari
 ---
 
 [🏠 Back to Main Menu](../README.md)
+
+## First-run checks
+
+In the Discord Developer Portal, check the privileged intents requested by the client: **Message Content**, **Server Members**, and **Presence**. If slash commands are missing, check the installation scope and the command registration logs.
