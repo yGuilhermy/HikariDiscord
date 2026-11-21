@@ -20,8 +20,8 @@ Hikari's **Radio Mode** is a complete musical playback and interactive voice eco
 Radio Mode eliminates the need to download full YouTube files before starting playback.
 
 - **Real-Time Streaming (`youtubeBufferStream.js`)**: Pipes `yt-dlp` output directly into `ffmpeg`, producing a continuous stream of linear PCM s16le audio (48,000 Hz, 16-bit stereo).
-- **Minimum Initial Buffer**: Waits for **4 seconds of audio** (768,000 bytes) to start playing on Discord in ~4 seconds after request.
-- **Flow Control (Backpressure)**: Pauses process reading when buffer reaches **20 seconds** (3,840,000 bytes) and resumes when it drops below **10 seconds**, optimizing VPS memory.
+- **Initial buffer.** Playback starts after buffering 1 second of PCM (192,000 bytes). Total startup time also depends on track resolution and the network.
+- **Flow control.** Reading pauses at 8 seconds of buffered audio and resumes at 4 seconds.
 - **Underflow Handling**: On network drops, feeds 20ms silence frames to maintain `@discordjs/voice` clock sync without dropping the player.
 
 ---
@@ -105,4 +105,8 @@ The visual Radio panel (`radioEmbed.js`) provides real-time interactive controls
 
 ---
 
-[🏠 Back to Main Menu](../README.md)
+[🏠 Back to Main Menu](./README.md)
+
+### Search modes
+
+**Hybrid**, the default search setting, keeps YouTube links as YouTube tracks. **Fast** tries to find a matching Deezer track for each item in a YouTube link. To combine conversation and playback in a voice channel, use the hybrid call mode.

@@ -1,5 +1,7 @@
 # 🛠️ External Development and Tool System (MCP)
 
+[Tool catalog by edition and conversation examples](https://projetohikari.com/docs/conversa-e-funcoes/)
+
 This guide is for developers and enthusiasts who wish to expand Hikari's brain using the **Model Context Protocol (MCP)**.
 
 ---
@@ -37,7 +39,7 @@ Hikari's MCP ecosystem has been robustly enhanced with specific native behaviors
 - **Linguistic Flexibility:** If the searched game name fails in the FitGirl/DODI database, the AI attempts to search for slightly different names or spelling variations.
 - **List Embed:** The tool can return an interactive list of found games, allowing the AI to present a selection for the user to choose from instead of directly sending the Torrent file.
 
-### 3. Image Generation (`image_gen`)
+### 3. Image Generation (`generate_image`)
 - **Transparency on Limitations:** The AI is now instructed to refuse requests to edit existing images and make it clear that she does not possess native computer vision in real-time.
 
 ### 4. Media Downloader (`download_video`, `download_audio` & `search_and_download_music`)

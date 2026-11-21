@@ -1,5 +1,7 @@
 # 🔑 Environment Variables and Configuration Guide
 
+[Online configuration reference (Portuguese)](https://projetohikari.com/docs/referencia/variaveis-ambiente/)
+
 This guide explains each entry in the `.env` file and Hikari's internal settings, including the necessary links to obtain API keys.
 
 ---
@@ -68,10 +70,10 @@ This guide explains each entry in the `.env` file and Hikari's internal settings
 ## 👑 Governance and Preferences
 
 - **`OWNER_ID`**: Your Discord user ID (or multiple separated by commas). This ID is the bot owner, and only they can use commands with the Owner flag.
-- **`PREFIX`**: Prefix for legacy commands (if any). Default: `@`.
+- **`PREFIX`**: Prefix for legacy commands (if any). Code default: `_`.
 - **`BOT_NAME`**: The name Hikari will recognize as her own.
-- **`REQUIRE_TOS`**: If `true`, new servers must accept the terms of use before using the bot.
-- **`SAVE_HISTORY`**: Saves message history in `src/data/history.txt` for debugging.
+- **`REQUIRE_TOS`**: If `true`, new servers must accept the terms of use before using the bot. The code default is disabled.
+- **`SAVE_HISTORY`**: Saves message history in `src/data/historico.txt` for debugging.
 - **`AI_DB_READ`**: Enables reading and querying from the permanent autonomous AI database (`true`/`false`).
 - **`AI_DB_WRITE`**: Enables writing new records to the permanent database (`true`/`false`).
 - **`AI_DB_EDIT`**: Enables editing existing records in the permanent database (`true`/`false`).

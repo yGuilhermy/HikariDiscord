@@ -1,5 +1,7 @@
 # 🛠️ Desenvolvimento Externo e Sistema de Ferramentas (MCP)
 
+[Catálogo por edição e exemplos de conversa](https://projetohikari.com/docs/conversa-e-funcoes/)
+
 Este guia é voltado para desenvolvedores e entusiastas que desejam expandir o cérebro da Hikari usando o **Model Context Protocol (MCP)**.
 
 ---
@@ -37,7 +39,7 @@ O ecossistema MCP da Hikari foi robustamente aprimorado com comportamentos nativ
 - **Flexibilidade Linguística:** Se o nome do jogo buscado falhar na base FitGirl/DODI, a IA tenta buscar por nomes ligeiramente diferentes ou variações.
 - **Embed de Lista:** A ferramenta pode retornar uma lista interativa de jogos encontrados, permitindo que a IA apresente uma seleção para o usuário escolher em vez de enviar diretamente o Torrent.
 
-### 3. Geração de Imagens (`image_gen`)
+### 3. Geração de Imagens (`generate_image`)
 - **Transparência de Limitações:** A IA agora é instruída a recusar pedidos de edição de imagens e deixar claro que não possui visão computacional nativa em tempo real ao usar a ferramenta.
 
 ### 4. Downloader de Mídia (`download_video`, `download_audio` & `search_and_download_music`)
@@ -91,4 +93,4 @@ A personalidade da Hikari não é apenas texto; é um conjunto de diretrizes de 
 - 💡 **Isolamento de Erros:** Sempre use `try-catch` em volta de novas ferramentas. Uma ferramenta mal implementada pode derrubar todo o processo do bot se não for tratada.
 
 ---
-[🏠 Voltar ao Menu Principal](../README.md)
+[🏠 Voltar ao Menu Principal](../../README.md)

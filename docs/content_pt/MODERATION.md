@@ -62,10 +62,10 @@ Os subcomandos abaixo são exclusivos do criador do bot.
 
 ## 💡 Dicas de Moderação e Segurança
 
-- 💡 **Script enable_automod.js:** Você pode rodar `node enable_automod.js` no terminal da aplicação para atualizar síncronamente todos os servidores para o modo `both`, excluir servidores específicos via lista de exclusão (whitelist) e disparar um anúncio formal com botão do GitHub aos chats gerais dos servidores cadastrados.
+- **Administração.** Use `/config_criador automod` para escolher o modo por servidor.
 - 💡 **ID do Canal de Apelação:** Configure `APPEAL_CHANNEL_ID` no `.env`. Usuários banidos receberão um link para este canal para tentar reverter a punição.
 - 💡 **Remoção Silenciosa:** Se você clicar no botão `Remover Bot` no webhook administrativo, a Hikari sairá do servidor de destino sem emitir nenhum aviso, evitando atritos desnecessários.
 - 💡 **Trigger Word:** O log de aviso agora exibe exatamente a **Palavra Chave** que ativou o AutoMod, facilitando o discernimento entre ataques reais e falsos positivos.
 
 ---
-[🏠 Voltar ao Menu Principal](../README.md)
+[🏠 Voltar ao Menu Principal](../../README.md)

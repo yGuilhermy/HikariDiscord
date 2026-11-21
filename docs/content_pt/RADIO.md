@@ -20,8 +20,8 @@ O **Modo Rádio** da Hikari é um ecossistema completo de reprodução musical e
 O Modo Rádio elimina a necessidade de realizar o download completo de arquivos do YouTube antes de iniciar a reprodução.
 
 - **Streaming em Tempo Real (`youtubeBufferStream.js`)**: Redireciona a saída do `yt-dlp` diretamente para o `ffmpeg`, produzindo um fluxo contínuo de áudio em PCM s16le (48.000 Hz, estéreo 16-bit).
-- **Buffer Inicial Mínimo**: Aguarda apenas **4 segundos de áudio** (768.000 bytes) para iniciar o som no Discord em cerca de ~4 segundos após a solicitação.
-- **Controle de Fluxo (Backpressure)**: Pausa temporariamente a leitura do processo quando o buffer em memória atinge **20 segundos** (3.840.000 bytes) e retoma a leitura ao cair para **10 segundos**, otimizando a RAM da VPS.
+- **Buffer inicial.** O player acumula 1 segundo de PCM (192.000 bytes) antes de iniciar. O tempo total também depende da resolução da faixa e da rede.
+- **Controle de fluxo.** A leitura pausa ao atingir 8 segundos de áudio em memória e retoma quando o buffer cai para 4 segundos.
 - **Tratamento de Underflow**: Em flutuações de rede, envia pequenos frames de silêncio (20ms) mantendo a sincronia de tempo do `@discordjs/voice` sem derrubar o player.
 
 ---
@@ -105,4 +105,8 @@ O painel visual do Rádio (`radioEmbed.js`) fornece controles interativos em tem
 
 ---
 
-[🏠 Voltar ao Menu Principal](../README.md)
+[🏠 Voltar ao Menu Principal](../../README.md)
+
+### Modos de busca do painel
+
+**Híbrido**, indicado como padrão no botão de busca, mantém links do YouTube como faixas do YouTube. **Rápido** tenta encontrar no Deezer uma faixa equivalente para cada item de um link do YouTube. Esse botão muda a busca de fontes. Para combinar conversa e reprodução na chamada, use o modo de chamada Híbrido.

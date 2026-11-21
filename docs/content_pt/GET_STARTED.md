@@ -97,4 +97,4 @@ npx pm2 start index.js --name hikari
 
 ---
 
-[🏠 Voltar ao Menu Principal](../README.md)
+[🏠 Voltar ao Menu Principal](../../README.md)

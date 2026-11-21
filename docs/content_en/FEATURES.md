@@ -96,11 +96,12 @@ To avoid inflating the System Prompt on every request with hundreds of static to
 - **Protection Against Unauthorized Edits & Deletions:**
   - Records tagged as **important** (`important: true`) can only be modified or deleted by the **original author** who created them, by **Server Staff/Moderators** (`Administrator`, `ManageGuild`, `ManageMessages`, or Server Owner), or by the **Bot Creator** (`isOwner`).
   - Unauthorized attempts by regular members are politely and naturally refused in chat by Hikari (without emojis), safeguarding community lore and notes against trolls.
-  - Simple records (`important: false`) can be edited or deleted normally by any member.
+  - Regular records can be edited when the tool is enabled. Replacing or deleting any record requires the author, server moderation or the instance owner.
 - **Privacy Shield Against Bulk Dumps:** The AI is strictly barred from dumping the entire database (`*`, `all`, `dump`) for regular users, naturally explaining privacy constraints and asking the user to specify a topic.
 - **Conduct Directives & Harmful Content Prevention:** Hikari strictly refuses to store defamatory notes, user harassment, attacks, Discord TOS violations, or criminal activities in the database.
 - **Visual Footer Identification:** Responses derived from database lookups display the footer badge `-# 💾 Database`.
 - **Creator Protection (`protected: true`):** Core structural records (such as `creator_info`) are locked against modification or deletion by anyone other than the bot creator.
+- **Scope.** The database belongs to the instance. Per-server settings control tool access, and records use the same shared file.
 - **Granular Control via Environment & Panel:** Access can be individually managed via `.env` (`AI_DB_READ`, `AI_DB_WRITE`, `AI_DB_EDIT`, `AI_DB_DELETE`) or toggled inside the Owner Config Panel (`/config_criador bot_config`). Disabling read access automatically cascades to block write, edit, and delete operations.
 - **Open-Source Privacy:** The database file `src/data/ai_database.json` is ignored in `.gitignore`, ensuring personal notes never leak to public repositories.
 

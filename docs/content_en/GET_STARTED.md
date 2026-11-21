@@ -97,7 +97,7 @@ npx pm2 start index.js --name hikari
 
 ---
 
-[🏠 Back to Main Menu](../README.md)
+[🏠 Back to Main Menu](./README.md)
 
 ## First-run checks
 

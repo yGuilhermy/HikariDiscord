@@ -96,11 +96,12 @@ Para evitar inflar o System Prompt a cada requisição com centenas de tokens de
 - **Trava contra Deleção e Adulteração por Terceiros:**
   - Registros marcados como **importantes** (`important: true`) só podem ser alterados ou excluídos pelo **próprio autor** que os criou, por membros da **Staff/Moderação** (`Administrator`, `ManageGuild`, `ManageMessages` ou Dono do Servidor) ou pelo **Criador do Bot** (`isOwner`).
   - Tentativas de outros membros comuns são recusadas pela Hikari de forma amigável e natural no chat (sem emojis), protegendo anotações da comunidade contra trolls.
-  - Registros simples (`important: false`) podem ser editados ou excluídos normalmente por qualquer membro.
+  - Registros comuns podem ser editados se a ferramenta estiver habilitada. Sobrescrever ou excluir qualquer registro exige autoria, moderação ou propriedade da instância.
 - **Blindagem contra Vazamento e Dumps em Massa:** A IA é instruída e bloqueada de realizar despejos globais de todo o banco de dados (`*`, `tudo`, `dump`) para usuários comuns por motivos de segurança e privacidade, direcionando o usuário a especificar o tópico desejado (com bypass para o Criador).
 - **Diretriz de Conduta e Proteção contra Conteúdo Nocivo:** A IA recusa categoricamente gravar acusações, difamações, ataques contra usuários, apologia a crimes ou violações aos Termos de Serviço do Discord no banco de dados.
 - **Identificação Visual no Rodapé:** Respostas formuladas com base em dados recuperados do banco exibem o indicador `-# 💾 Database`.
 - **Proteção do Criador (`protected: true`):** Registros estruturais (como `creator_info`) são blindados contra sobrescrita e deleção por qualquer usuário além do dono do bot.
+- **Escopo.** O banco pertence à instância. As permissões por servidor controlam as ferramentas, mas os registros usam o mesmo arquivo compartilhado.
 - **Controle Granular por Variáveis e Painel:** O acesso pode ser gerenciado individualmente via `.env` (`AI_DB_READ`, `AI_DB_WRITE`, `AI_DB_EDIT`, `AI_DB_DELETE`) ou pelos botões do Painel de Configuração do Criador (`/config_criador bot_config`). Caso a leitura seja desativada, a escrita e deleção são automaticamente bloqueadas por segurança.
 - **Privacidade Open-Source:** O arquivo físico `src/data/ai_database.json` é ignorado no `.gitignore`, garantindo que informações pessoais e dados locais nunca vazem para o repositório público do GitHub.
 
@@ -129,4 +130,4 @@ A Hikari suporta envio de mensagens de voz oficiais no chat com player de microf
 
 ---
 
-[🏠 Voltar ao Menu Principal](../README.md)
+[🏠 Voltar ao Menu Principal](../../README.md)

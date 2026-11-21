@@ -1,5 +1,7 @@
 <h1 align="center">🌌 Hikari (The Silver Glare) ✧</h1>
 
+<p align="center"><a href="https://projetohikari.com/">Project website</a> · <a href="https://projetohikari.com/docs/discord/">Online documentation</a> · <a href="https://discord.projetohikari.com/">Discord community</a></p>
+
 <div align="center">
   <picture>
     <source

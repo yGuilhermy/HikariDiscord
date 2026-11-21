@@ -61,7 +61,7 @@ The subcommands below are restricted to the bot creator.
 
 ## 💡 Moderation and Security Tips
 
-- 💡 **Script enable_automod.js:** You can run `node enable_automod.js` in the application terminal to synchronously update all servers to `both` mode, exclude specific servers via a whitelist, and post an update announcement with a GitHub button to their general chats.
+- **Administration.** Use `/config_criador automod` to set a mode for a specific server.
 - 💡 **Appeal Channel ID:** Configure `APPEAL_CHANNEL_ID` in `.env`. Banned users will receive a link to this channel to attempt to reverse the punishment.
 - 💡 **Silent Removal:** If you click the `Remove Bot` button in the administrative webhook, Hikari will leave the target server without issuing any warning, avoiding unnecessary friction.
 - 💡 **Trigger Word:** The warning log now displays exactly the **Keyword** that activated the AutoMod, making it easier to distinguish between actual attacks and false positives.

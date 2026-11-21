@@ -1,5 +1,7 @@
 # 🔑 Guia de Variáveis de Ambiente e Configuração / Environment & Config Guide
 
+[Referência no site](https://projetohikari.com/docs/referencia/variaveis-ambiente/)
+
 Este guia explica cada entrada do arquivo `.env` e as configurações internas da Hikari, com os links necessários para obter as chaves de API.
 
 ---
@@ -68,9 +70,9 @@ Este guia explica cada entrada do arquivo `.env` e as configurações internas d
 ## 👑 Governança e Preferências
 
 - **`OWNER_ID`**: Seu ID de usuário do Discord (ou vários separados por vírgula). Esse ID é o dono do bot, e só ele poderá usar comandos com flag Dono.
-- **`PREFIX`**: Prefixo para comandos legados (se houver). Padrão: `@`.
+- **`PREFIX`**: Prefixo para comandos legados (se houver). Padrão no código: `_`.
 - **`BOT_NAME`**: O nome que a Hikari reconhecerá como sendo dela.
-- **`REQUIRE_TOS`**: Se `true`, novos servidores precisam aceitar os termos de uso antes de usar o bot.
+- **`REQUIRE_TOS`**: Se `true`, novos servidores precisam aceitar os termos de uso antes de usar o bot. O padrão no código é desativado.
 - **`SAVE_HISTORY`**: Salva o histórico de mensagens em `src/data/historico.txt` para depuração.
 - **`AI_DB_READ`**: Habilita a leitura/consulta no banco de dados autônomo permanente (`true`/`false`).
 - **`AI_DB_WRITE`**: Habilita a gravação de novos dados no banco permanente (`true`/`false`).
@@ -88,4 +90,4 @@ Este guia explica cada entrada do arquivo `.env` e as configurações internas d
 
 ---
 
-[🏠 Voltar ao Menu Principal](../README.md)
+[🏠 Voltar ao Menu Principal](../../README.md)

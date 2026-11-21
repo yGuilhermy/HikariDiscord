@@ -69,4 +69,4 @@ Centralizamos todas as constantes globais para facilitar a manutenção. Abaixo,
 - 💡 **Retrocompatibilidade:** O campo `ownerId` (singular) no objeto config sempre apontará para o primeiro ID da lista, garantindo que módulos legados continuem funcionando.
 
 ---
-[🏠 Voltar ao Menu Principal](../README.md)
+[🏠 Voltar ao Menu Principal](../../README.md)
