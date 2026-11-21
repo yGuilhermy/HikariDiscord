@@ -372,3 +372,7 @@ VOICE_TEMPERATURE=0.65
 ### `/config_criador bot_config` Command
 
 In Discord, run `/config_criador bot_config` and open **🎙️ Voz & Áudio (TTS)** to customize speed, temperature, cooldowns, and character caps directly through interactive components.
+
+## Troubleshooting voice calls
+
+If Hikari cannot join, make sure you are in a voice channel where the bot can connect and speak. If it joins without reacting, say “Hikari” followed by a question. Check microphone input and transcription. Ask for a voice message in text chat to test speech synthesis independently.

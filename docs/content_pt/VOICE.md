@@ -373,3 +373,7 @@ VOICE_TEMPERATURE=0.65
 ### Painel `/config_criador bot_config`
 
 No Discord, digite `/config_criador bot_config` e navegue até a categoria **🎙️ Voz & Áudio (TTS)** para ajustar velocidade, temperatura, cooldown e limites de caracteres diretamente pela interface de botões.
+
+## Diagnóstico de chamadas
+
+Se a Hikari não entrar na chamada, confirme que você está em um canal de voz e que o bot pode conectar e falar nele. Se ela entrar sem responder, teste dizendo “Hikari” seguido da pergunta. Verifique o microfone e a transcrição antes de investigar a síntese. Use uma nota de voz no chat para testar a síntese independentemente da chamada.
