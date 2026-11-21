@@ -32,7 +32,7 @@ Unlike legacy bots that support only one owner, Hikari uses a list of IDs for ad
 ### Configuration:
 In the `.env` file, fill `OWNER_ID` with the user IDs separated by commas.
 ```env
-OWNER_ID=593372065730396160,123456789012345678
+OWNER_ID=123456789012345678,234567890123456789
 ```
 
 ### Technical Implementation:

@@ -32,7 +32,7 @@ Diferente de bots legados que suportam apenas um proprietário, a Hikari utiliza
 ### Configuração:
 No `.env`, preencha `OWNER_ID` com os IDs dos usuários separados por vírgula.
 ```env
-OWNER_ID=593372065730396160,123456789012345678
+OWNER_ID=123456789012345678,234567890123456789
 ```
 
 ### Implementação Técnica:
