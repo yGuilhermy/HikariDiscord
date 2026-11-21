@@ -101,7 +101,7 @@ To avoid inflating the System Prompt on every request with hundreds of static to
 - **Conduct Directives & Harmful Content Prevention:** Hikari strictly refuses to store defamatory notes, user harassment, attacks, Discord TOS violations, or criminal activities in the database.
 - **Visual Footer Identification:** Responses derived from database lookups display the footer badge `-# 💾 Database`.
 - **Creator Protection (`protected: true`):** Core structural records (such as `creator_info`) are locked against modification or deletion by anyone other than the bot creator.
-- **Granular Control via Environment & Panel:** Access can be individually managed via `.env` (`AI_DB_READ`, `AI_DB_WRITE`, `AI_DB_EDIT`, `AI_DB_DELETE`) or toggled inside the Owner Config Panel (`/config`). Disabling read access automatically cascades to block write, edit, and delete operations.
+- **Granular Control via Environment & Panel:** Access can be individually managed via `.env` (`AI_DB_READ`, `AI_DB_WRITE`, `AI_DB_EDIT`, `AI_DB_DELETE`) or toggled inside the Owner Config Panel (`/config_criador bot_config`). Disabling read access automatically cascades to block write, edit, and delete operations.
 - **Open-Source Privacy:** The database file `src/data/ai_database.json` is ignored in `.gitignore`, ensuring personal notes never leak to public repositories.
 
 ---

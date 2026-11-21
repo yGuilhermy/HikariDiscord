@@ -1,201 +1,68 @@
-# 🎮 Guia Avançado de Comandos / Advanced Commands Guide
-
-Este documento detalha todos os comandos slash (/) disponíveis na Hikari, suas funcionalidades, parâmetros e permissões.
-
----
-
-## 📂 Sumário
-
-1. [🧠 IA & Chat](#-ia--chat)
-2. [🎨 Imagens & Arte](#-imagens--arte)
-3. [🎵 Multimídia & Utilidades](#-multimídia--utilidades)
-4. [🎮 Jogos & Downloads](#-jogos--downloads)
-5. [🏪 Consulta na Loja](#-consulta-na-loja)
-6. [⚙️ Configuração & Administração](#-configuração--administração)
-7. [💡 Dicas de Especialista](#-dicas-de-especialista)
-
----
-
-## 🧠 IA & Chat
-
-### `/ia_chat`
-
-O comando principal para interagir com o cérebro da Hikari.
-
-- **Prompt:** Sua pergunta ou pedido.
-- **Visibilidade:** Escolha entre `Público` (todos veem) ou `Privado` (apenas você vê).
-- **Advanced:** Se você mencionar outras pessoas no prompt, a Hikari pode tentar entender o contexto da conversa.
-
-### `/chat_resumo`
-
-Faz a leitura das últimas mensagens e gera um resumo inteligente.
-
-- **Quantidade:** O número de mensagens a analisar (Min: 10, Max: 100).
-- **Advanced:** Útil para entender discussões longas que você perdeu.
-
-### `/chat_humor` (Admin)
-
-Altera a "alma" da Hikari em um canal específico.
-
-- **Instrucao:** Novas regras de comportamento (ex: "Fale como um pirata").
-- **Mood:** Estado emocional (ex: "Brava", "Feliz").
-- **Reset:** Volta às configurações padrão.
-- **Advanced:** Essas mudanças persistem apenas no canal onde foram aplicadas.
-
-### `/chat_espontaneo` (Dono)
-
-Configura a Hikari para se intrometer nas conversas sem ser chamada.
-
-- **Estado:** Ativar ou Desativar.
-- **Frequência:** Escolha entre `Baixa`, `Média` ou `Alta`.
-- **Porcentagem (🔒 Dono):** Chance exata (0-100%) para cada mensagem recebida no canal.
-
----
-
-## 🎨 Imagens & Arte
-
-### `/ia_imagem`
-
-Gera imagens usando diversos modelos de difusão.
-
-- **Prompt:** Descrição detalhada do que você quer.
-- **Negative Prompt:** O que você NÃO quer na imagem.
-- **Width/Height:** Dimensões da imagem (512px a 1280px).
-- **Provider:** Escolha o gerador (Stability, HuggingFace, Pollinations, etc).
-- **Advanced:** O modo `Auto` tentará os provedores em sequência até um funcionar.
-
----
-
-## 🎙️ Voz & Calls
-
-### `/entrar-call`
-
-Conecta a Hikari ao seu canal de voz atual para atendimento inteligente por voz.
-
-- **Advanced:** A Hikari escuta os usuários no canal de voz e responde ao ouvir o gatilho "Hikari" (ou equivalências fonéticas). Suporta nativamente o protocolo DAVE (E2EE) de criptografia do Discord e filtro de silêncio por RMS de áudio.
-
-### `/sair-call`
-
-Desconecta a Hikari do canal de voz em que ela está conectada no servidor.
-
-- **Advanced:** Pode ser acionado via comando slash, voz ("Hikari, saia da call") ou via ferramenta MCP. Desconecta automaticamente em caso de inatividade quando todos os usuários saem da call.
-
----
-
-## 🎵 Multimídia & Utilidades
-
-### `/baixar_musica`
-
-Extrai e converte o áudio de vídeos em formato MP3.
-
-- **URL:** O link do vídeo (YouTube, Instagram Reels, TikTok ou Twitter/X).
-- **Advanced:** Utiliza `yt-dlp` para baixar a melhor qualidade de áudio e `ffmpeg` para converter em MP3 de forma limpa, limpando os arquivos locais em seguida.
-
-### `/baixar_musica_deezer`
-
-Busca e baixa faixas de música de alta qualidade diretamente do catálogo Deezer pelo nome da música ou artista.
-
-- **Nome:** O nome da música e/ou artista que deseja pesquisar e baixar.
-- **Advanced:** Utiliza a API REST do Deezer e o motor `deemix` para baixar o áudio de estúdio oficial em MP3 HQ. Possui um algoritmo de pontuação de fidelidade (Match Confidence Score) e exibe um menu de seleção interativo caso haja ambiguidade. Os arquivos baixados são 100% temporários e removidos imediatamente após o envio.
-
-### `/baixar_video`
-
-Baixa vídeos e envia em formato MP4 no chat do Discord.
-
-- **URL:** O link do vídeo (YouTube Shorts, Instagram Reels, TikTok ou Twitter/X).
-- **Descricao (Boolean):** Se verdadeiro, exibe o autor e a descrição do vídeo original na mensagem. Padrão: `false`.
-- **Advanced:** Detecta o limite de upload do servidor para aplicar compressão de vídeo em FFMPEG se ultrapassar os limites do Discord. Oferece fila de compressão assíncrona.
-
-### `/anime_origem`
-
-Identifica um anime através de um print/imagem.
-
-- **Imagem:** Upload de um arquivo.
-- **URL:** Link direto para a imagem.
-- **Advanced:** Usa a API Trace.moe para encontrar o episódio e o tempo exato da cena.
-
-### `/converter_moeda`
-
-Converte moedas fiduciárias e criptomoedas em tempo real.
-
-- **Valor:** Montante numérico a ser convertido.
-- **De:** Código de origem (Ex: USD, EUR, BTC).
-- **Para:** Código de destino (Ex: BRL).
-- **Advanced:** Utiliza uma API de câmbio em tempo real integrada com cache físico diário (JSON) no bot e fallback inteligente para moedas menos comuns. Totalmente integrada à IA via chat.
-
----
-
-## 🎮 Jogos & Downloads
-
-### `/buscar_jogo`
-
-Procura torrents/magnets de jogos de forma abrangente.
-
-- **Nome:** Título do jogo.
-- **Advanced:** Pesquisa refinada nas bases de dados da FitGirl e DODI Repacks. Agora inclui um paginador com botões para alternar as páginas de 5 em 5 itens diretamente no Discord.
-
----
-
-## 🏪 Consulta na Loja
-
-### `/steam_jogo`
-
-Consulta informações oficiais, preço e status na loja da Steam.
-
-- **Nome:** Nome do jogo para pesquisar.
-- **Advanced:** Retorna preço regional, porcentagem de desconto, desenvolvedores e pontuação do Metacritic. A IA fará um pequeno comentário sobre o preço ou o jogo se os servidores estiverem online.
-
----
-
-## ⚙️ Configuração & Administração
-
-### `/config_servidor` (Server Admin)
-
-Painel gráfico unificado e público no chat para administração do servidor.
-
-- **Personalidade & Humor:** Define instruções customizadas (prompts) e estados emocionais para a IA no canal.
-- **Mensagens Espontâneas:** Controla o status (ativado/desativado) e a frequência em que a IA se intromete nas conversas.
-- **Canal de Updates:** Define o canal oficial para receber comunicados de atualizações.
-- **Respostas a Mentions:** Configura se a IA deve responder quando o servidor for mencionado em `@everyone` ou `@here`.
-- **Ferramentas MCP:** Abre o Gerenciador Gráfico de Ferramentas MCP com lista de ativas/desativadas, descrições detalhadas e botões de ativar/desativar.
-
-### `/config_criador` (Dono / Criador)
-
-Central de Controle Master para gerenciamento global da rede Hikari (oculta e restrita ao criador).
-
-- **Subcomando `painel` / `dashboard`:** Abre o Dashboard Master por botões.
-- **Modelos:** Configura o modelo LLM ativo e exibição de modelo/pensamento.
-- **Banir / Desbanir / Lista de Bans:** Gerencia a lista negra global de usuários, servidores e canais banidos.
-- **AutoMod:** Alterna o modo de moderação automática (Off / Monitor / Strict).
-- **Ferramentas MCP:** Gerencia a ativação de ferramentas MCP por servidor.
-- **Banco de Dados Permanente:** Gerencia permissões globais de leitura, escrita, edição e exclusão na memória persistente da IA.
-- **Bot Config:** Abre as configurações de Runtime da IA.
-
-### `/ia_ferramentas` (Server Admin)
-
-Comando independente para administradores de servidor gerenciarem as ferramentas da IA.
-
-- **Ação `list`:** Exibe um embed público com as ferramentas MCP ativas e desativadas no servidor.
-- **Ação `toggle`:** Alterna a disponibilidade de uma ferramenta específica (`join_voice_call`, `search_game`, `generate_image`, `db_read`, `db_write`, `db_edit`, `db_delete`, etc.).
-- **Ação `reset`:** Restaura as ferramentas do servidor para os padrões de fábrica.
-
-### `/aceitar_tos` (Server Admin)
-
-Exibe e registra o aceite dos Termos de Serviço da Hikari para liberar e autorizar as funções do bot no servidor.
-
-### `/ia_config` (Dono)
-
-Ajusta parâmetros técnicos de baixo nível dos modelos de IA (`Timeout`, `Temperatura`, `Max Tokens`).
-
----
-
-## 💡 Dicas de Especialista
-
-- 💡 **Privacidade em Primeiro Lugar:** Use o parâmetro `visibilidade: Privado` no comando `/ia_chat` para tratar de assuntos sensíveis ou evitar poluir o chat com textos longos da IA.
-- 💡 **Qualidade de Imagem:** Ao usar `/ia_imagem`, capriche no `negative_prompt` com termos como `blurry, deformed, low quality` para forçar a IA a gerar resultados mais nítidos.
-- 💡 **Multiversidade de IAs:** Se um provedor de imagem estiver lento, experimente trocar o `provider` manualmente. O `Pollinations` é geralmente o mais estável, com suporte a modelos FLUX.
-- 💡 **Histórico de Contexto:** A Hikari "lembra" das últimas mensagens do canal. Use isso a seu favor ao pedir resumos ou continuar uma conversa sem precisar repetir tudo.
-
----
-
-[🏠 Voltar ao Menu Principal](../README.md)
+# Comandos Slash da Hikari Discord
+
+Use /ajuda no Discord para abrir o menu. Os parâmetros entre colchetes são opcionais, salvo condições explicadas na descrição. O Discord controla quais comandos aparecem para cada usuário.
+
+## Conversa e ajuda
+
+| Comando | Parâmetros | O que faz |
+| :--- | :--- | :--- |
+| `/ia_chat` | `prompt`, `[visibilidade=public/private]`, `[voice=true/false]` | Faça uma pergunta ou um pedido. A resposta é privada por padrão e pode ser enviada em voz. |
+| `/chat_resumo` | `[quantidade=10–100]` | Resume as mensagens recentes do canal. A quantidade aceita vai de 10 a 100. |
+| `/ajuda` | — | Abre este painel com a lista de comandos. |
+
+## Imagem e mídia
+
+| Comando | Parâmetros | O que faz |
+| :--- | :--- | :--- |
+| `/ia_imagem` | `prompt`, `[negative_prompt]`, `[width=512–1280]`, `[height=512–1280]`, `[provider=auto/flux/pollinations/stablehorde]` | Gera uma imagem a partir de uma descrição e aceita a escolha de provedor. |
+| `/anime_origem` | `[imagem]`, `[url]` | Identifica uma cena de anime por imagem anexada ou URL. Envie pelo menos uma das duas. |
+| `/baixar_musica` | `url` | Extrai o áudio em MP3 de um link de vídeo compatível. |
+| `/baixar_musica_deezer` | `nome` | Busca e baixa uma faixa no Deezer pelo nome da música ou do artista. |
+| `/baixar_musica_atual` | `[usuario]` | Identifica a música pela atividade do Discord, como Spotify ou YouTube Music, e procura a faixa para baixar. |
+| `/baixar_video` | `url`, `[descricao=true/false]` | Baixa um vídeo em MP4 e ajusta a compressão para o limite de envio. A opção descricao liga a exibição da descrição. |
+
+## Jogos e câmbio
+
+| Comando | Parâmetros | O que faz |
+| :--- | :--- | :--- |
+| `/buscar_jogo` | `nome`, `[fonte=any/dodi/fitgirl]` | Busca jogos pelo nome nos catálogos locais DODI e FitGirl. |
+| `/steam_jogo` | `nome` | Consulta preço e detalhes de um jogo na Steam. |
+| `/converter_moeda` | `valor`, `de`, `para` | Converte um valor entre moedas tradicionais ou criptomoedas. |
+
+## Chamadas e rádio
+
+| Comando | Parâmetros | O que faz |
+| :--- | :--- | :--- |
+| `/entrar-call` | `[modo=conversa/radio/hibrido]` | Entra no seu canal de voz em modo Conversa, Rádio ou Híbrido. |
+| `/sair-call` | — | Desconecta a Hikari do canal de voz. |
+| `/modo-radio` | — | Ativa o modo de reprodução de música no canal de voz. |
+| `/modo-hibrido` | — | Ativa música e conversa por voz no mesmo canal. |
+
+## Administração do servidor
+
+| Comando | Parâmetros | O que faz |
+| :--- | :--- | :--- |
+| `/config_servidor` · Gerenciar Servidor | `[instrucao]`, `[mood]`, `[reset_humor=true/false]`, `[espontaneo_estado=on/off]`, `[espontaneo_frequencia=low/medium/high]`, `[espontaneo_porcentagem=0–100]`, `[canal_updates]`, `[mencoes_ativo=true/false]`, `[canal_alvo]`, `[canal_status=enable/disable]`, `[multi_mcp_embeds=true/false]` | Abre o painel do servidor ou aplica as opções informadas. |
+| `/ia_ferramentas` · Gerenciar Servidor | `acao=list/toggle/toggle_embeds/reset`, `[ferramenta]`, `[estado=on/off]` | Consulta, altera ou restaura as ferramentas do servidor. Também alterna os embeds de múltiplas ferramentas. |
+| `/aceitar_tos` · Gerenciar Canais | — | Abre os Termos de Uso para o servidor revisar e aceitar. |
+
+## Configuração do criador
+
+| Comando | Parâmetros | O que faz |
+| :--- | :--- | :--- |
+| `/ia_config` · Criador | `[provider=local/gemini/pollinations/hf/horde]`, `[setting=timeout/temperature/max_tokens]`, `[value]` | Ajusta parâmetros de IA. Ao informar um provedor, informe também o parâmetro e o valor. |
+| `/config_criador` · Criador | `modelo`, `banir`, `desbanir`, `bans_lista`, `automod`, `ferramenta`, `bot_config`, `painel`, `dashboard` | Gerencia a instância por subcomandos, incluindo painel, modelos e moderação global. |
+
+### /config_criador
+
+- `/config_criador modelo` `[mostrar_nome=true/false]`, `[mostrar_pensamento=true/false]`, `[multi_mcp_embeds=true/false]`, `[retentativas=0–10]`
+- `/config_criador banir` `tipo=user/guild/channel`, `id`, `[motivo]`
+- `/config_criador desbanir` `tipo=user/guild/channel`, `id`
+- `/config_criador bans_lista`
+- `/config_criador automod` `servidor_id`, `modo=off/trigger/mcp/both`
+- `/config_criador ferramenta` `acao=toggle/list/reset`, `[ferramenta]`, `[estado=on/off]`, `[servidor_id]`
+- `/config_criador bot_config`
+- `/config_criador painel`
+- `/config_criador dashboard`
+
+[Comandos no site](https://projetohikari.com/docs/discord/comandos/)

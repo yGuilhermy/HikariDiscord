@@ -46,10 +46,12 @@ User blocking can be triggered by two simultaneous methods:
 
 Every security alert sent via Webhook has immediate action buttons. This is processed asynchronously.
 
-- `/adm_banir type:[user|guild] id:[ID] reason:[text]`
-- `/adm_desbanir`
-- `/adm_lista_bans`
-- `/adm_automod id:[ID] modo:[off|trigger|mcp|both]` - Allows administrators to dynamically change the security behavior of each individual server:
+The subcommands below are restricted to the bot creator.
+
+- `/config_criador banir tipo:<user|guild|channel> id:<ID> [motivo:<text>]`
+- `/config_criador desbanir tipo:<user|guild|channel> id:<ID>`
+- `/config_criador bans_lista`
+- `/config_criador automod servidor_id:<ID> modo:<off|trigger|mcp|both>` - Allows the bot creator to dynamically change the security behavior of each individual server:
   - `off`: Disables all AutoMod functions.
   - `trigger`: Enables only the Keyword Trigger filter.
   - `mcp`: Enables only the cognitive AI moderaion.

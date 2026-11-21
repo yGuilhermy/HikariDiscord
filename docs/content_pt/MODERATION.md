@@ -47,10 +47,12 @@ O bloqueio do usuário pode ser ativado por dois métodos simultâneos:
 
 Todo alerta de segurança enviado via Webhook possui botões de ação imediata. Isso é processado de forma assíncrona.
 
-- `/adm_banir type:[user|guild] id:[ID] motivo:[texto]`
-- `/adm_desbanir`
-- `/adm_lista_bans`
-- `/adm_automod id:[ID] modo:[off|trigger|mcp|both]` - Permite que os administradores mudem dinamicamente o comportamento de segurança de cada servidor individualmente:
+Os subcomandos abaixo são exclusivos do criador do bot.
+
+- `/config_criador banir tipo:<user|guild|channel> id:<ID> [motivo:<texto>]`
+- `/config_criador desbanir tipo:<user|guild|channel> id:<ID>`
+- `/config_criador bans_lista`
+- `/config_criador automod servidor_id:<ID> modo:<off|trigger|mcp|both>` - Permite que o criador do bot mudem dinamicamente o comportamento de segurança de cada servidor individualmente:
   - `off`: Desativa qualquer AutoMod.
   - `trigger`: Ativa apenas o Filtro de Gatilhos Rápido.
   - `mcp`: Ativa apenas a moderação cognitiva da IA.

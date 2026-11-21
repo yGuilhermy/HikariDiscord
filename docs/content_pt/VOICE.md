@@ -14,7 +14,7 @@ Este documento detalha o funcionamento técnico da voz neural da Hikari, a arqui
 6. [🛠️ 6. Tutorial: Clonagem e Extração de Latentes (XTTS v2)](#-6-tutorial-clonagem-e-extração-de-latentes-xtts-v2)
 7. [🤗 7. Tutorial: Hospedagem no Hugging Face Space (ZeroGPU)](#-7-tutorial-hospedagem-no-hugging-face-space-zerogpu)
 8. [☁️ 8. Tutorial: Hospedagem no Modal.com (NVIDIA T4 Serverless)](#-8-tutorial-hospedagem-no-modalcom-nvidia-t4-serverless)
-9. [⚙️ 9. Configurações do Bot (.env e /config)](#-9-configurações-do-bot-env-e-config)
+9. [⚙️ 9. Configurações do Bot (.env e painel do criador)](#-9-configurações-do-bot-env-e-painel-do-criador)
 
 ---
 
@@ -352,9 +352,9 @@ O Modal imprimirá o endpoint de acesso direto, por exemplo:
 
 ---
 
-## ⚙️ 9. Configurações do Bot (.env e /config)
+## ⚙️ 9. Configurações do Bot (.env e painel do criador)
 
-Para vincular os serviços ao bot, declare as variáveis no seu `.env` ou configure pelo comando interativo `/config` no Discord:
+Para vincular os serviços ao bot, declare as variáveis no seu `.env` ou configure pelo comando interativo `/config_criador bot_config` no Discord:
 
 ```env
 HF_TTS_ENDPOINT=https://seu-usuario-nome-do-space.hf.space
@@ -370,6 +370,6 @@ VOICE_SPEED=1.15
 VOICE_TEMPERATURE=0.65
 ```
 
-### Painel `/config`
+### Painel `/config_criador bot_config`
 
-No Discord, digite `/config` e navegue até a categoria **🎙️ Voz & Áudio (TTS)** para ajustar velocidade, temperatura, cooldown e limites de caracteres diretamente pela interface de botões.
+No Discord, digite `/config_criador bot_config` e navegue até a categoria **🎙️ Voz & Áudio (TTS)** para ajustar velocidade, temperatura, cooldown e limites de caracteres diretamente pela interface de botões.

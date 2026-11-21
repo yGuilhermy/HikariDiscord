@@ -2,264 +2,58 @@ const { EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, 
 const fs = require('fs');
 const path = require('path');
 
-const COMMAND_DETAILS = {
-    'ia_chat': {
-        name: '/ia_chat',
-        category: '🧠 Inteligência Artificial',
-        permission: '👥 Todos os Usuários',
-        description: 'Inicia uma conversa ou faz uma pergunta direta ao cérebro de IA da Hikari.',
-        syntax: '/ia_chat prompt:<texto> [visibilidade:Publico|Privado] [voice:True|False]',
-        options: [
-            { name: 'prompt', desc: 'Pergunta, dúvida, instrução ou conversa desejada.', required: true },
-            { name: 'visibilidade', desc: 'Publico (todos veem no chat) ou Privado (apenas você vê).', required: false },
-            { name: 'voice', desc: 'True (responde em mensagem de voz oficial) ou False (força texto).', required: false }
-        ],
-        examples: [
-            '/ia_chat prompt: Me explique como funciona a fotossíntese de forma simples',
-            '/ia_chat prompt: Qual a diferença entre Docker e Máquina Virtual? visibilidade:Privado',
-            '/ia_chat prompt: Me conta uma curiosidade voice:True'
-        ]
-    },
-    'config_servidor': {
-        name: '/config_servidor',
-        category: '⚙️ Administração de Servidor',
-        permission: '🛡️ Administrador do Servidor (Gerenciar Servidor)',
-        description: 'Abre o Painel Gráfico de Administração do Servidor para bloquear/liberar chats, configurar humor, falas espontâneas, updates, menções e ferramentas MCP.',
-        syntax: '/config_servidor',
-        options: [],
-        examples: [
-            '/config_servidor'
-        ]
-    },
-    'ia_ferramentas': {
-        name: '/ia_ferramentas',
-        category: '⚙️ Administração de Servidor',
-        permission: '🛡️ Administrador do Servidor (Gerenciar Servidor)',
-        description: 'Permite consultar a lista de ferramentas MCP do servidor, ativá-las/desativá-las ou restaurar o padrão de fábrica.',
-        syntax: '/ia_ferramentas acao:<list|toggle|reset> [ferramenta:<nome>] [estado:<on|off>]',
-        options: [
-            { name: 'acao', desc: 'list (ver status), toggle (alternar) ou reset (restaurar padrão).', required: true },
-            { name: 'ferramenta', desc: 'Nome da ferramenta a ser alterada (com autocomplete).', required: false },
-            { name: 'estado', desc: 'on (Ativar) ou off (Desativar).', required: false }
-        ],
-        examples: [
-            '/ia_ferramentas acao:list',
-            '/ia_ferramentas acao:toggle ferramenta:generate_image estado:off'
-        ]
-    },
-    'aceitar_tos': {
-        name: '/aceitar_tos',
-        category: '⚙️ Administração de Servidor',
-        permission: '🛡️ Administrador do Servidor (Gerenciar Servidor)',
-        description: 'Exibe os Termos de Serviço da Hikari e registra o aceite do servidor para desbloquear a utilização de todos os comandos.',
-        syntax: '/aceitar_tos',
-        options: [],
-        examples: [
-            '/aceitar_tos'
-        ]
-    },
-    'config_criador': {
-        name: '/config_criador',
-        category: '👑 Painel do Criador',
-        permission: '👑 Criador do Bot (Exclusivo)',
-        description: 'Central de Controle Master para gerenciar modelos LLM, bans globais, AutoMod, MCPs e runtime do bot.',
-        syntax: '/config_criador [subcomando]',
-        options: [
-            { name: 'subcomando', desc: 'painel, modelo, banir, desbanir, bans_lista, automod, ferramenta, bot_config.', required: false }
-        ],
-        examples: [
-            '/config_criador painel'
-        ]
-    },
-    'ia_config': {
-        name: '/ia_config',
-        category: '👑 Painel do Criador',
-        permission: '👑 Criador do Bot (Exclusivo)',
-        description: 'Ajusta parâmetros de baixo nível da IA como Timeout, Temperatura e limite de Max Tokens.',
-        syntax: '/ia_config provider:<provedor> setting:<opcao> value:<numero>',
-        options: [
-            { name: 'provider', desc: 'Provedor de IA a ser configurado.', required: true },
-            { name: 'setting', desc: 'Timeout, Temperatura ou Max Tokens.', required: true },
-            { name: 'value', desc: 'Novo valor numérico.', required: true }
-        ],
-        examples: [
-            '/ia_config provider:gemini setting:Temperatura value:0.7'
-        ]
-    },
-    'entrar-call': {
-        name: '/entrar-call',
-        category: '🎙️ Voz & Calls',
-        permission: '👥 Todos os Usuários',
-        description: 'Faz a Hikari entrar no seu canal de voz atual nos modos Conversa, Rádio ou Híbrido.',
-        syntax: '/entrar-call [modo:conversa|radio|hibrido]',
-        options: [
-            { name: 'modo', desc: 'Modo de operação: conversa (padrão), radio ou hibrido.', required: false }
-        ],
-        examples: [
-            '/entrar-call',
-            '/entrar-call modo:radio',
-            '/entrar-call modo:hibrido'
-        ]
-    },
-    'sair-call': {
-        name: '/sair-call',
-        category: '🎙️ Voz & Calls',
-        permission: '👥 Todos os Usuários',
-        description: 'Desconecta a Hikari do canal de voz atual em que ela está conectada.',
-        syntax: '/sair-call',
-        options: [],
-        examples: [
-            '/sair-call'
-        ]
-    },
-    'modo-radio': {
-        name: '/modo-radio',
-        category: '🎙️ Voz & Calls',
-        permission: '👥 Todos os Usuários',
-        description: 'Inicia o Modo Rádio de música no canal de voz com controles interativos por voz e botões.',
-        syntax: '/modo-radio',
-        options: [],
-        examples: [
-            '/modo-radio'
-        ]
-    },
-    'modo-hibrido': {
-        name: '/modo-hibrido',
-        category: '🎙️ Voz & Calls',
-        permission: '👥 Todos os Usuários',
-        description: 'Ativa o Modo Híbrido integrando player de música e respostas por voz no chat.',
-        syntax: '/modo-hibrido',
-        options: [],
-        examples: [
-            '/modo-hibrido'
-        ]
-    },
-    'ia_imagem': {
-        name: '/ia_imagem',
-        category: '🎨 Arte & Criatividade',
-        permission: '👥 Todos os Usuários',
-        description: 'Gera artes e ilustrações digitais exclusivas em HD usando o modelo SDXL Flash.',
-        syntax: '/ia_imagem prompt:<descricao> [negative_prompt:<bloqueios>] [width:<largura>] [height:<altura>]',
-        options: [
-            { name: 'prompt', desc: 'Descrição detalhada da imagem a ser criada.', required: true },
-            { name: 'negative_prompt', desc: 'O que NÃO deve aparecer na imagem.', required: false },
-            { name: 'width', desc: 'Largura em pixels (padrão: 1024).', required: false },
-            { name: 'height', desc: 'Altura em pixels (padrão: 1024).', required: false }
-        ],
-        examples: [
-            '/ia_imagem prompt: Um gato astronauta flutuando no espaço com nebulosas coloridas ao fundo'
-        ]
-    },
-    'anime_origem': {
-        name: '/anime_origem',
-        category: '🎨 Arte & Criatividade',
-        permission: '👥 Todos os Usuários',
-        description: 'Identifica o anime, episódio e o minuto exato a partir da imagem/print enviada.',
-        syntax: '/anime_origem imagem:<arquivo>',
-        options: [
-            { name: 'imagem', desc: 'Print ou imagem da cena do anime.', required: true }
-        ],
-        examples: [
-            '/anime_origem imagem:[print.jpg]'
-        ]
-    },
-    'baixar_musica': {
-        name: '/baixar_musica',
-        category: '🎵 Multimídia & Downloads',
-        permission: '👥 Todos os Usuários',
-        description: 'Extrai e faz o download de áudio (.mp3) a partir de links do YouTube, Instagram Reels, TikTok ou Twitter/X.',
-        syntax: '/baixar_musica url:<link>',
-        options: [
-            { name: 'url', desc: 'URL do vídeo do YouTube, Instagram, TikTok ou Twitter/X.', required: true }
-        ],
-        examples: [
-            '/baixar_musica url:https://www.youtube.com/watch?v=...',
-            '/baixar_musica url:https://x.com/username/status/...'
-        ]
-    },
-    'baixar_video': {
-        name: '/baixar_video',
-        category: '🎵 Multimídia & Downloads',
-        permission: '👥 Todos os Usuários',
-        description: 'Baixa o arquivo de vídeo (.mp4) de plataformas suportadas (YouTube Shorts, Instagram Reels, TikTok e Twitter/X).',
-        syntax: '/baixar_video url:<link> [descricao:True|False]',
-        options: [
-            { name: 'url', desc: 'URL do vídeo do YouTube Shorts, Instagram Reels, TikTok ou Twitter/X.', required: true },
-            { name: 'descricao', desc: 'Exibir descrição e autor do vídeo na resposta.', required: false }
-        ],
-        examples: [
-            '/baixar_video url:https://x.com/username/status/...',
-            '/baixar_video url:https://www.instagram.com/reel/...'
-        ]
-    },
-    'baixar_musica_deezer': {
-        name: '/baixar_musica_deezer',
-        category: '🎵 Multimídia & Downloads',
-        permission: '👥 Todos os Usuários',
-        description: 'Pesquisa e baixa músicas em alta qualidade de áudio (MP3 HQ) diretamente do Deezer por nome ou artista.',
-        syntax: '/baixar_musica_deezer busca:<nome_ou_artista>',
-        options: [
-            { name: 'busca', desc: 'Nome da música ou artista.', required: true }
-        ],
-        examples: [
-            '/baixar_musica_deezer busca:Welcome To The Jungle Guns N Roses'
-        ]
-    },
-    'converter_moeda': {
-        name: '/converter_moeda',
-        category: '💱 Utilidades',
-        permission: '👥 Todos os Usuários',
-        description: 'Realiza conversões monetárias entre moedas reais (USD, EUR, BRL) e criptomoedas (BTC, ETH) com cotação em tempo real.',
-        syntax: '/converter_moeda valor:<quantia> de:<moeda_origem> para:<moeda_destino>',
-        options: [
-            { name: 'valor', desc: 'Quantidade a converter.', required: true },
-            { name: 'de', desc: 'Moeda de origem (ex: USD, EUR, BTC).', required: true },
-            { name: 'para', desc: 'Moeda de destino (ex: BRL, EUR).', required: true }
-        ],
-        examples: [
-            '/converter_moeda valor:100 de:USD para:BRL'
-        ]
-    },
-    'chat_resumo': {
-        name: '/chat_resumo',
-        category: '💱 Utilidades',
-        permission: '👥 Todos os Usuários',
-        description: 'Lê as últimas mensagens do canal e gera um resumo inteligente dos tópicos conversados.',
-        syntax: '/chat_resumo [quantidade:<mensagens>]',
-        options: [
-            { name: 'quantidade', desc: 'Número de mensagens para analisar (10 a 100).', required: false }
-        ],
-        examples: [
-            '/chat_resumo quantidade:50'
-        ]
-    },
-    'buscar_jogo': {
-        name: '/buscar_jogo',
-        category: '🎮 Games & Loja',
-        permission: '👥 Todos os Usuários',
-        description: 'Busca links de download (magnet/torrent) de jogos de PC nos acervos FitGirl e DODI Repacks.',
-        syntax: '/buscar_jogo jogo:<nome_do_jogo>',
-        options: [
-            { name: 'jogo', desc: 'Nome do jogo de computador.', required: true }
-        ],
-        examples: [
-            '/buscar_jogo jogo:Elden Ring'
-        ]
-    },
-    'steam_jogo': {
-        name: '/steam_jogo',
-        category: '🎮 Games & Loja',
-        permission: '👥 Todos os Usuários',
-        description: 'Consulta a loja da Steam e exibe preços oficiais em R$, descontos, notas Metacritic e sinopse.',
-        syntax: '/steam_jogo jogo:<nome_do_jogo>',
-        options: [
-            { name: 'jogo', desc: 'Nome do jogo na Steam.', required: true }
-        ],
-        examples: [
-            '/steam_jogo jogo:Cyberpunk 2077'
-        ]
-    }
-};
+const { commands } = require('../commands/slashCommands');
+
+const COMMAND_GROUPS = [
+    ["Conversa e ajuda", [
+        ["ia_chat", "Faça uma pergunta ou um pedido. A resposta é privada por padrão e pode ser enviada em voz."],
+        ["chat_resumo", "Resume as mensagens recentes do canal. A quantidade aceita vai de 10 a 100."],
+        ["ajuda", "Abre este painel com a lista de comandos."],
+    ]],
+    ["Imagem e mídia", [
+        ["ia_imagem", "Gera uma imagem a partir de uma descrição e aceita a escolha de provedor."],
+        ["anime_origem", "Identifica uma cena de anime por imagem anexada ou URL. Envie pelo menos uma das duas."],
+        ["baixar_musica", "Extrai o áudio em MP3 de um link de vídeo compatível."],
+        ["baixar_musica_deezer", "Busca e baixa uma faixa no Deezer pelo nome da música ou do artista."],
+        ["baixar_musica_atual", "Identifica a música pela atividade do Discord, como Spotify ou YouTube Music, e procura a faixa para baixar."],
+        ["baixar_video", "Baixa um vídeo em MP4 e ajusta a compressão para o limite de envio. A opção descricao liga a exibição da descrição."],
+    ]],
+    ["Jogos e câmbio", [
+        ["buscar_jogo", "Busca jogos pelo nome nos catálogos locais DODI e FitGirl."],
+        ["steam_jogo", "Consulta preço e detalhes de um jogo na Steam."],
+        ["converter_moeda", "Converte um valor entre moedas tradicionais ou criptomoedas."],
+    ]],
+    ["Chamadas e rádio", [
+        ["entrar-call", "Entra no seu canal de voz em modo Conversa, Rádio ou Híbrido."],
+        ["sair-call", "Desconecta a Hikari do canal de voz."],
+        ["modo-radio", "Ativa o modo de reprodução de música no canal de voz."],
+        ["modo-hibrido", "Ativa música e conversa por voz no mesmo canal."],
+    ]],
+    ["Administração do servidor", [
+        ["config_servidor", "Abre o painel do servidor ou aplica as opções informadas."],
+        ["ia_ferramentas", "Consulta, altera ou restaura as ferramentas do servidor. Também alterna os embeds de múltiplas ferramentas."],
+        ["aceitar_tos", "Abre os Termos de Uso para o servidor revisar e aceitar."],
+    ]],
+    ["Configuração do criador", [
+        ["ia_config", "Ajusta parâmetros de IA. Ao informar um provedor, informe também o parâmetro e o valor."],
+        ["config_criador", "Gerencia a instância por subcomandos, incluindo painel, modelos e moderação global."],
+    ]],
+];
+
+const REGISTERED_COMMANDS = new Map(commands.map(command => [command.name, command]));
+const COMMAND_DETAILS = new Map(COMMAND_GROUPS.flatMap(([category, entries]) =>
+    entries.map(([name, description]) => [name, { category, description }])
+));
+
+function describeOption(option) {
+    const choices = option.choices?.map(choice => choice.value).join(', ');
+    const range = option.min_value !== undefined && option.max_value !== undefined
+        ? ' (' + option.min_value + '–' + option.max_value + ')'
+        : '';
+    const type = option.type === 5 ? ' · booleano' : '';
+    const details = choices ? ' · ' + choices : '';
+    return '• '+'`'+option.name+'`'+' ('+(option.required ? 'obrigatório' : 'opcional')+'): '+option.description+range+type+details;
+}
 
 function getMainCategorySelectMenu(currentActive = 'home') {
     const menuOptions = [
@@ -281,7 +75,7 @@ function buildHelpHomePayload() {
     const embed = new EmbedBuilder()
         .setColor(0x7C3AED)
         .setTitle('✨ Central de Ajuda — Hikari AI')
-        .setDescription('Bem-vindo(a) ao hub de ajuda oficial da **Hikari**!\n\nEu sou uma Agente Autônoma multifuncional para o Discord, equipada com inteligência artificial generativa, assistente de voz em chamadas, download de multimídia, busca de jogos torrent, cotações em tempo real e moderação de segurança.\n\n📖 **[Guia Completo de Comandos](https://github.com/yGuilhermy/HikariDiscord/blob/main/docs/content_pt/COMMANDS.md)**')
+        .setDescription('Bem-vindo(a) ao hub de ajuda oficial da **Hikari**!\n\nEu sou uma Agente Autônoma multifuncional para o Discord, equipada com inteligência artificial generativa, assistente de voz em chamadas, download de multimídia, busca de jogos torrent, cotações em tempo real e moderação de segurança.\n\n📖 **[Guia de comandos](https://projetohikari.com/docs/discord/comandos/)**')
         .addFields(
             { name: '🤖 Comandos & Inspeção', value: 'Explore a lista completa de comandos e selecione qualquer um no menu para ver sua sintaxe e exemplos.', inline: true },
             { name: '⚙️ Configuração do Servidor', value: 'Administradores podem usar `/config_servidor` ou `/ia_ferramentas` para ajustar os recursos.', inline: true },
@@ -300,51 +94,26 @@ function buildHelpHomePayload() {
 }
 
 function buildHelpCommandListPayload() {
+    const fields = COMMAND_GROUPS.map(([name, entries]) => ({
+        name,
+        value: entries.map(([command, description]) => '• '+'`'+'/'+command+'`'+' — '+description).join('\n')
+    }));
     const embed = new EmbedBuilder()
         .setColor(0x7C3AED)
-        .setTitle('🤖 Lista Geral de Comandos')
-        .setDescription('Confira abaixo a lista completa de comandos da Hikari. Selecione qualquer comando no menu abaixo para abrir sua **inspeção técnica detalhada** com exemplos e opções!\n\n📖 **[Documentação Online](https://github.com/yGuilhermy/HikariDiscord/blob/main/docs/content_pt/COMMANDS.md)**')
-        .addFields(
-            {
-                name: '🧠 Inteligência Artificial & Chat',
-                value: '• `/ia_chat` — Converse diretamente com a IA da Hikari (Suporta visibilidade Privada).'
-            },
-            {
-                name: '⚙️ Administração de Servidor (Server Admin)',
-                value: '• `/config_servidor` — Painel interativo de configuração do servidor.\n• `/ia_ferramentas` — Gerencia e inspeciona as ferramentas MCP do servidor.\n• `/aceitar_tos` — Exibe e aceita os Termos de Serviço no servidor.'
-            },
-            {
-                name: '🎙️ Voz & Assistente de Call',
-                value: '• `/entrar-call` — Conecta a Hikari ao seu canal de voz para voz por IA.\n• `/sair-call` — Desconecta a Hikari do canal de voz.\n• `/modo-radio` — Inicia o sistema de rádio de música no canal de voz.\n• `/modo-hibrido` — Ativa o Modo Híbrido de música e respostas por voz no chat.'
-            },
-            {
-                name: '🎨 Arte, Multimídia & Downloads',
-                value: '• `/ia_imagem` — Gera ilustrações digitais em alta definição (SDXL).\n• `/anime_origem` — Identifica anime, episódio e minuto por print.\n• `/baixar_musica` — Converte vídeos do YouTube/Reels/TikTok em MP3.\n• `/baixar_musica_deezer` — Busca e baixa MP3 HQ diretamente do Deezer.'
-            },
-            {
-                name: '🎮 Games, Loja & Utilidades',
-                value: '• `/buscar_jogo` — Procura torrents/magnets de jogos de PC.\n• `/steam_jogo` — Preços, promoções e detalhes na loja oficial da Steam.\n• `/converter_moeda` — Cotação de moedas e criptomoedas em tempo real.\n• `/chat_resumo` — Resumo inteligente das últimas mensagens do canal.'
-            },
-            {
-                name: '👑 Painel do Criador',
-                value: '• `/config_criador` — Central de Controle Master para o dono do bot.\n• `/ia_config` — Ajusta parâmetros técnicos de baixo nível da IA.'
-            }
-        )
-        .setFooter({ text: '💡 Selecione um comando no menu suspenso abaixo para ver a análise aprofundada' });
+        .setTitle('Comandos da Hikari')
+        .setDescription('Selecione um comando para ver os detalhes. [Referência no site](https://projetohikari.com/docs/discord/comandos/)')
+        .addFields(fields);
 
-    const commandOptions = Object.keys(COMMAND_DETAILS).map(key => {
-        const item = COMMAND_DETAILS[key];
-        return {
-            label: item.name,
-            description: item.description.substring(0, 95),
-            value: key
-        };
-    });
+    const commandOptions = COMMAND_GROUPS.flatMap(([, entries]) => entries.map(([name, description]) => ({
+        label: '/' + name,
+        description: description.slice(0, 95),
+        value: name
+    })));
 
     const cmdSelectMenu = new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder()
             .setCustomId('help_command_select')
-            .setPlaceholder('🔍 Selecione um comando para inspecionar em detalhes')
+            .setPlaceholder('Selecione um comando')
             .addOptions(commandOptions)
     );
 
@@ -352,28 +121,36 @@ function buildHelpCommandListPayload() {
 }
 
 function buildHelpCommandDetailPayload(commandId) {
-    const cmd = COMMAND_DETAILS[commandId];
-    if (!cmd) return buildHelpCommandListPayload();
+    const command = REGISTERED_COMMANDS.get(commandId);
+    const details = COMMAND_DETAILS.get(commandId);
+    if (!command || !details) return buildHelpCommandListPayload();
 
+    const creator = commandId === 'ia_config' || commandId === 'config_criador';
+    const permissions = creator ? 'Criador do bot'
+        : command.default_member_permissions === '32' ? 'Gerenciar Servidor'
+        : command.default_member_permissions === '16' ? 'Gerenciar Canais'
+        : 'Disponível aos usuários';
     const embed = new EmbedBuilder()
         .setColor(0x7C3AED)
-        .setTitle(`🔍 Inspeção Técnica: ${cmd.name}`)
-        .setDescription(`**Categoria:** ${cmd.category}\n**Permissão Mínima:** ${cmd.permission}\n\n**📄 Descrição:**\n${cmd.description}\n\n**💻 Sintaxe do Comando:**\n\`\`\`bash\n${cmd.syntax}\n\`\`\``)
-        .setTimestamp();
+        .setTitle('/' + command.name)
+        .setDescription(details.description + '\n\n' + details.category + ' · ' + permissions);
 
-    if (cmd.options && cmd.options.length > 0) {
-        const optText = cmd.options.map(o => `• \`${o.name}\` (${o.required ? 'Obrigatório' : 'Opcional'}): ${o.desc}`).join('\n');
-        embed.addFields({ name: '🛠️ Parâmetros & Opções', value: optText, inline: false });
+    const options = command.options || [];
+    const subcommands = options.filter(option => option.type === 1);
+    if (subcommands.length) {
+        for (const subcommand of subcommands) {
+            const description = subcommand.description.replace(/^\[Creator\] /, '');
+            embed.addFields({
+                name: '/' + command.name + ' ' + subcommand.name,
+                value: [description, ...(subcommand.options || []).map(describeOption)].join('\n')
+            });
+        }
     } else {
-        embed.addFields({ name: '🛠️ Parâmetros & Opções', value: '*Este comando não exige parâmetros adicionais.*', inline: false });
+        if (!options.length) embed.addFields({ name: 'Parâmetros', value: 'Sem parâmetros.' });
+        for (let i = 0; i < options.length; i += 5) {
+            embed.addFields({ name: i === 0 ? 'Parâmetros' : 'Mais parâmetros', value: options.slice(i, i + 5).map(describeOption).join('\n') });
+        }
     }
-
-    if (cmd.examples && cmd.examples.length > 0) {
-        const exText = cmd.examples.map(e => `\`\`\`bash\n${e}\n\`\`\``).join('\n');
-        embed.addFields({ name: '💡 Exemplos Práticos de Uso', value: exText, inline: false });
-    }
-
-    embed.setFooter({ text: 'Hikari Command Inspector • Use os botões para navegar' });
 
     const btnRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('help_btn_cmd_list').setLabel('⬅️ Voltar à Lista de Comandos').setStyle(ButtonStyle.Primary),

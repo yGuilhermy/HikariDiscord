@@ -14,7 +14,7 @@ This document covers the technical design of Hikari's neural voice system, the a
 6. [🛠️ 6. Tutorial: Voice Cloning & Latent Extraction (XTTS v2)](#-6-tutorial-voice-cloning--latent-extraction-xtts-v2)
 7. [🤗 7. Tutorial: Hosting on Hugging Face Spaces (ZeroGPU)](#-7-tutorial-hosting-on-hugging-face-spaces-zerogpu)
 8. [☁️ 8. Tutorial: Hosting on Modal.com (NVIDIA T4 Serverless)](#-8-tutorial-hosting-on-modalcom-nvidia-t4-serverless)
-9. [⚙️ 9. Bot Configuration (.env and /config)](#-9-bot-configuration-env-and-config)
+9. [⚙️ 9. Bot Configuration (.env and creator panel)](#-9-bot-configuration-env-and-creator-panel)
 
 ---
 
@@ -351,9 +351,9 @@ Modal outputs a direct public URL, for example:
 
 ---
 
-## ⚙️ 9. Bot Configuration (.env and /config)
+## ⚙️ 9. Bot Configuration (.env and creator panel)
 
-Set your environment variables in `.env` or manage them via the `/config` dashboard in Discord:
+Set your environment variables in `.env` or manage them via the `/config_criador bot_config` dashboard in Discord:
 
 ```env
 HF_TTS_ENDPOINT=https://your-username-space-name.hf.space
@@ -369,6 +369,6 @@ VOICE_SPEED=1.15
 VOICE_TEMPERATURE=0.65
 ```
 
-### `/config` Command
+### `/config_criador bot_config` Command
 
-In Discord, run `/config` and open **🎙️ Voz & Áudio (TTS)** to customize speed, temperature, cooldowns, and character caps directly through interactive components.
+In Discord, run `/config_criador bot_config` and open **🎙️ Voz & Áudio (TTS)** to customize speed, temperature, cooldowns, and character caps directly through interactive components.
