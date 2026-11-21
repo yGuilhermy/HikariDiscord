@@ -4,6 +4,8 @@ Use /ajuda no Discord para abrir o menu. Os parâmetros entre colchetes são opc
 
 ## Conversa e ajuda
 
+Em `/ia_chat`, só `prompt` é obrigatório. Escolha `visibilidade=public` se quiser que outras pessoas do canal vejam a resposta. Em uma chamada, `/entrar-call` usa o modo Conversa por padrão. selecione `radio` para abrir uma sessão musical ou `hibrido` para combinar música e conversa.
+
 | Comando | Parâmetros | O que faz |
 | :--- | :--- | :--- |
 | `/ia_chat` | `prompt`, `[visibilidade=public/private]`, `[voice=true/false]` | Faça uma pergunta ou um pedido. A resposta é privada por padrão e pode ser enviada em voz. |

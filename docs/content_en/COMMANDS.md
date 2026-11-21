@@ -4,6 +4,8 @@ Use /ajuda in Discord to open the interactive help. Square brackets mark optiona
 
 ## Chat and help
 
+For `/ia_chat`, only `prompt` is required. Set `visibilidade=public` to make the reply visible to other channel members. `/entrar-call` defaults to conversation mode. Select `radio` for a music session or `hibrido` for music and voice chat.
+
 | Command | Parameters | Behavior |
 | :--- | :--- | :--- |
 | `/ia_chat` | `prompt`, `[visibilidade=public/private]`, `[voice=true/false]` | Ask a question. Replies are private by default and can be sent as voice messages. |
