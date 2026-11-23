@@ -1,4 +1,5 @@
 const path = require('path');
+const { effort, redact } = require('./logPolicy');
 const dotenv = require('dotenv');
 
 dotenv.config({ path: path.join(__dirname, '../../.env') });
@@ -94,6 +95,10 @@ function formatDuration(ms) {
 }
 
 function enqueue(category, text, isImmediate = false) {
+  const mode = effort();
+  if (!targetChannelId || mode === 0) return;
+  if (mode === 1) text = 'Evento operacional registrado.';
+  else text = redact(text);
   const time = getTimeString();
   const timePart = `${DISCORD_ANSI.gray}[${time}]${DISCORD_ANSI.reset}`;
   const tagPart = `${category.color}[${category.tag}]${DISCORD_ANSI.reset}`;
@@ -131,7 +136,7 @@ function splitChunks(lines, maxLen = 1800) {
 async function sendToDiscord(content) {
   const ch = clientInstance?.channels?.cache?.get(targetChannelId);
   if (ch && typeof ch.send === 'function') {
-    return await ch.send({ content }).catch(() => null);
+    return await ch.send({ content, allowedMentions: { parse: [] } }).catch(() => null);
   }
 
   const token = botToken || process.env.DISCORD_TOKEN;
@@ -143,7 +148,7 @@ async function sendToDiscord(content) {
       Authorization: `Bot ${token}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ content })
+    body: JSON.stringify({ content, allowed_mentions: { parse: [] } })
   }).catch(() => null);
 }
 

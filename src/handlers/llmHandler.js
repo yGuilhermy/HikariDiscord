@@ -3,7 +3,7 @@ const cheerio = require('cheerio');
 const fs = require('fs');
 const path = require('path');
 const { smartSearch } = require('./searchManager');
-const { AttachmentBuilder, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, WebhookClient, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { AttachmentBuilder, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const {
     downloadAudio,
     downloadVideo,
@@ -21,6 +21,7 @@ const { getSteamGameInfo } = require('./steamHandler');
 const { convertCurrency, formatCurrencyNumber, parseCurrencyQuery } = require('./currencyHandler');
 const { handleMusicSearchAndDownload } = require('./deezerMusicHandler');
 const telemetryLogger = require('../utils/telemetryLogger');
+const { logger, effort, sanitizePaths } = require('../utils/logger');
 require('dotenv').config();
 const config = require('../config');
 const geminiCooldowns = {};
@@ -844,9 +845,20 @@ function stripThinking(text) {
 }
 
 const { checkBan, addBan, removeBan, getBans, checkAutoBan, getAutoBlock, getAutoBlockMode, forbiddenKeywords } = require('./banHandler');
+async function sendSystemModerationNotice(url, content) {
+    await axios.post(url, { content, allowed_mentions: { parse: [] } }, { timeout: 8000 }).catch(() => {});
+}
+
+function sanitizeModerationEmbed(embed) {
+    return {
+        ...embed,
+        ...(embed.description && { description: sanitizePaths(embed.description) }),
+        fields: embed.fields.map(field => ({ ...field, value: sanitizePaths(field.value) }))
+    };
+}
 async function checkAndReportNSFW(prompt, userTag, userId, aiResponse, interaction) {
     const webhookUrl = config.avisosWebhookUrl;
-    if (!webhookUrl) return;
+    if (!webhookUrl || effort() === 0) return;
     const lowerPrompt = (prompt || "").toLowerCase();
     const lowerResponse = (aiResponse || "").toLowerCase();
     const forbiddenWordMatcher = (text) => {
@@ -857,6 +869,7 @@ async function checkAndReportNSFW(prompt, userTag, userId, aiResponse, interacti
     };
     const exactWord = forbiddenWordMatcher(lowerPrompt) || forbiddenWordMatcher(lowerResponse);
     if (exactWord) {
+        if (effort() === 1) return sendSystemModerationNotice(webhookUrl, 'Conteúdo sinalizado pela moderação.');
         const guildName = interaction?.guild?.name || "DM";
         const guildId = interaction?.guild?.id || interaction?.guildId || "N/A";
         const channelName = interaction?.channel?.name || "Chat";
@@ -884,7 +897,7 @@ async function checkAndReportNSFW(prompt, userTag, userId, aiResponse, interacti
             ]
         }];
         try {
-            await axios.post(webhookUrl, { embeds: [embed], components: components });
+            await axios.post(webhookUrl, { embeds: [sanitizeModerationEmbed(embed)], components, allowed_mentions: { parse: [] } });
             console.log(`[SECURITY] Alerta enviado para o Webhook de Avisos.`);
         } catch (error) {
             console.error('[SECURITY] Erro ao enviar para o Webhook de Avisos:', error.message);
@@ -893,7 +906,8 @@ async function checkAndReportNSFW(prompt, userTag, userId, aiResponse, interacti
 }
 async function reportAutoBanViolation(violation, interaction, prompt, userTag, userId) {
     const webhookUrl = config.avisosWebhookUrl;
-    if (!webhookUrl) return;
+    if (!webhookUrl || effort() === 0) return;
+    if (effort() === 1) return sendSystemModerationNotice(webhookUrl, 'Violação detectada com bloqueio automático desativado.');
     const { type, id, keyword } = violation;
     const guildName = interaction?.guild?.name || "DM";
     const guildId = interaction?.guild?.id || interaction?.guildId || "N/A";
@@ -923,25 +937,18 @@ async function reportAutoBanViolation(violation, interaction, prompt, userTag, u
         ]
     }];
     try {
-        await axios.post(webhookUrl, { embeds: [embed], components: components });
+        await axios.post(webhookUrl, { embeds: [sanitizeModerationEmbed(embed)], components, allowed_mentions: { parse: [] } });
         console.log(`[SECURITY] Alerta de violação enviado (Auto-Block OFF).`);
     } catch (error) {
         console.error('[SECURITY] Erro ao enviar alerta de violação:', error.message);
     }
 }
-function savePromptToHistory(prompt, userTag, userId, aiResponse, interaction) {
-    if (config.saveHistory) {
-        const timestamp = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-        const guildName = interaction?.guild?.name || "DM";
-        const guildId = interaction?.guild?.id || interaction?.guildId || "N/A";
-        const channelName = interaction?.channel?.name || "Chat";
-        const channelId = interaction?.channel?.id || "N/A";
-        const logEntry = `[${timestamp}] Usuário: ${userTag} (ID: ${userId})\nPrompt: "${prompt}"\nResposta IA: "${aiResponse}"\nLocal: {${guildName} - ${guildId}} {${channelName} - ${channelId}}\n-------------\n`;
-        const historyPath = path.join(__dirname, '../data/historico.txt');
-        fs.appendFile(historyPath, logEntry, (err) => {
-            if (err) {
-                console.error('Erro ao salvar o prompt no historico.txt:', err);
-            }
+function reportConversation(prompt, userTag, userId, aiResponse, interaction) {
+    if (effort() === 2) {
+        logger.historico('Conversa concluída', {
+            userTag, userId, prompt, response: aiResponse,
+            guildId: interaction?.guild?.id || interaction?.guildId,
+            channelId: interaction?.channel?.id
         });
     }
     checkAndReportNSFW(prompt, userTag, userId, aiResponse, interaction);
@@ -1340,6 +1347,7 @@ async function tryGemini(prompt, systemPrompt, options = {}) {
                 continue;
             }
             try {
+                logger.event('AI', 'api', `Tentativa Gemini com ${modelName}, chave ${i + 1}/${apiKeys.length}`);
                 if (options.onProviderAttempt) {
                     try {
                         await options.onProviderAttempt(`gemini ${i + 1}/${apiKeys.length}`);
@@ -1469,7 +1477,7 @@ async function tryGemini(prompt, systemPrompt, options = {}) {
                 if (axios.isCancel(error)) throw error;
                 const status = error.response ? error.response.status : 'Unknown';
                 const msg = error.response?.data?.error?.message || error.message;
-                console.warn(`[Gemini] Falha na chave ${i + 1} com o modelo ${modelName} (Status: ${status}): ${msg}`);
+                logger.event('WARN', 'api-failure', `[Gemini] Falha na chave ${i + 1} com o modelo ${modelName} (Status: ${status}): ${msg}`, status);
                 if (status === 429) {
                     if (!geminiCooldowns[currentKey]) {
                         geminiCooldowns[currentKey] = {};
@@ -1662,6 +1670,7 @@ VOCÊ DEVE ADERIR A ESSA NOVA PERSONA ACIMA DE TUDO.\n`;
                                 provider.func === tryPollinations ? 'pollinations' :
                                 provider.func === tryHuggingFace ? 'hf' :
                                 provider.func === tryKoboldHorde ? 'horde' : 'unknown';
+            if (provider.func !== tryGemini) logger.event('AI', 'api', `Tentativa de IA via ${providerKey}`);
             if (options.onProviderAttempt) {
                 try {
                     await options.onProviderAttempt(providerKey);
@@ -1747,6 +1756,7 @@ ${prompt}
             if (!result.text) throw new Error('Resposta vazia após remoção de thinking block');
             let finalOutput = result.text.trim();
             const cleanModelName = result.modelName.replace(/\(Stream\)$/, '').trim();
+            logger.event('AI', 'api-success', `Resposta via ${result.modelName || provider.func.name}`);
             telemetryLogger.ai({
                 model: cleanModelName,
                 durationMs: providerDurationMs,
@@ -1774,7 +1784,7 @@ ${prompt}
         } catch (error) {
             let errorDetails = error.response?.data?.error?.message || error.response?.data?.error || error.message;
             if (typeof errorDetails === 'object') errorDetails = JSON.stringify(errorDetails);
-            console.warn(`[IA] Falha no provedor. Motivo completo:\n${errorDetails}`);
+            logger.event('WARN', 'api-failure', `[IA] Falha no provedor. Motivo completo:\n${errorDetails}`, error.response?.status);
             telemetryLogger.warn(`Falha provedor IA: ${error.message || 'desconhecido'}`);
             lastError = errorDetails;
         }
@@ -1849,6 +1859,7 @@ async function executeAgentLoop(initialTools, initialThought, prompt, channelId,
 
         for (const item of toolsForThisLayer) {
             executedToolsList.push(item.tool);
+            logger.event('AI', 'tool', item.tool);
             telemetryLogger.tool({ name: item.tool });
 
             try {
@@ -2199,7 +2210,7 @@ Responda APENAS com texto puro diretamente ao usuário. NÃO use ferramentas, N�
 
     addToHistory(channelId, 'user', prompt);
     addToHistory(channelId, 'assistant', synthesizedText);
-    savePromptToHistory(prompt, userTag, userId, `[AGENT_LOOP: ${executedToolsList.join(', ')}]`, interaction);
+    reportConversation(prompt, userTag, userId, `[AGENT_LOOP: ${executedToolsList.join(', ')}]`, interaction);
 }
 
 async function executeMultiTools(toolData, prompt, channelId, userId, userTag, interaction, type, unifiedReply, replyMessage, modelFooter, duration, options, guildId, guildName, channelName) {
@@ -2787,7 +2798,7 @@ Como o projeto é open-source, você pode hospedar sua própria versão e ter co
                     if (isToolDisabled(targetGuildId, toolData.tool)) {
                         console.warn(`[MCP TOOL] Ferramenta '${toolData.tool}' está desativada no servidor ${targetGuildId}. Execução abortada.`);
                         processedResponse = `⚠️ A ferramenta \`${toolData.tool}\` está desativada neste servidor.`;
-                        savePromptToHistory(prompt, userTag, userId, `[TOOL: BLOCKED - ${toolData.tool}]`, interaction);
+                        reportConversation(prompt, userTag, userId, `[TOOL: BLOCKED - ${toolData.tool}]`, interaction);
                         await unifiedReply(processedResponse);
                         return;
                     }
@@ -2795,6 +2806,7 @@ Como o projeto é open-source, você pode hospedar sua própria versão e ter co
                     if (toolData.thought) {
                         console.log(`[AI THOUGHT] ${toolData.thought}`);
                     }
+                    logger.event('AI', 'tool', toolData.tool);
                     telemetryLogger.tool({ name: toolData.tool });
                     const AGENT_LOOP_TOOLS = ['check_steam', 'convert_currency', 'search_web', 'db_read', 'db_write', 'db_edit', 'db_delete', 'get_creator_info', 'generate_image', 'send_voice_note'];
                     if (AGENT_LOOP_TOOLS.includes(toolData.tool)) {
@@ -2815,7 +2827,7 @@ Como o projeto é open-source, você pode hospedar sua própria versão e ter co
                             interaction.hybridClient || interaction.radioClient || null
                         );
                         if (radioResult) await unifiedReply(radioResult);
-                        savePromptToHistory(prompt, userTag, userId, `[TOOL: RADIO_MCP]`, interaction);
+                        reportConversation(prompt, userTag, userId, `[TOOL: RADIO_MCP]`, interaction);
                         return;
                     }
                     if (toolData.tool === 'download_audio') {
@@ -2849,7 +2861,7 @@ Como o projeto é open-source, você pode hospedar sua própria versão e ter co
                         } finally {
                             unlockUser(audioUserId);
                         }
-                        savePromptToHistory(prompt, userTag, userId, `[TOOL: DOWNLOAD_AUDIO]`, interaction);
+                        reportConversation(prompt, userTag, userId, `[TOOL: DOWNLOAD_AUDIO]`, interaction);
                         return;
                     }
                     if (toolData.tool === 'get_current_music') {
@@ -2875,7 +2887,7 @@ Como o projeto é open-source, você pode hospedar sua própria versão e ter co
                                 msg += '\n\n> **Como ativar:**\n> Vá em **Configurações do Discord → Privacidade e Segurança → Atividade de Status** e ative a opção **"Exibir atividade atual como mensagem de status"**.';
                             }
                             await unifiedReply(msg);
-                            savePromptToHistory(prompt, userTag, userId, `[TOOL: GET_CURRENT_MUSIC - FAIL:${musicInfo.reason}]`, interaction);
+                            reportConversation(prompt, userTag, userId, `[TOOL: GET_CURRENT_MUSIC - FAIL:${musicInfo.reason}]`, interaction);
                             return;
                         }
                         const isTargetOther = musicInfo.targetUser && musicInfo.targetUser.id !== userId;
@@ -2937,7 +2949,7 @@ Como o projeto é open-source, você pode hospedar sua própria versão e ter co
                         } finally {
                             unlockUser(musicUserId);
                         }
-                        savePromptToHistory(prompt, userTag, userId, `[TOOL: GET_CURRENT_MUSIC - ${musicInfo.title}]`, interaction);
+                        reportConversation(prompt, userTag, userId, `[TOOL: GET_CURRENT_MUSIC - ${musicInfo.title}]`, interaction);
                         return;
                     }
                     if (toolData.tool === 'search_and_download_music') {
@@ -2977,7 +2989,7 @@ Como o projeto é open-source, você pode hospedar sua própria versão e ter co
                         } finally {
                             unlockUser(musicUserId);
                         }
-                        savePromptToHistory(prompt, userTag, userId, `[TOOL: SEARCH_AND_DOWNLOAD_MUSIC]`, interaction);
+                        reportConversation(prompt, userTag, userId, `[TOOL: SEARCH_AND_DOWNLOAD_MUSIC]`, interaction);
                         return;
                     }
                     if (toolData.tool === 'download_video') {
@@ -3029,7 +3041,7 @@ Como o projeto é open-source, você pode hospedar sua própria versão e ter co
                         } finally {
                             unlockUser(videoUserId);
                         }
-                        savePromptToHistory(prompt, userTag, userId, `[TOOL: DOWNLOAD_VIDEO]`, interaction);
+                        reportConversation(prompt, userTag, userId, `[TOOL: DOWNLOAD_VIDEO]`, interaction);
                         return;
                     }
                     if (toolData.tool === 'search_game') {
@@ -3064,7 +3076,7 @@ Como o projeto é open-source, você pode hospedar sua própria versão e ter co
                                 const payload = { content: '', embeds: [gameEmbed], files: [attachment], components: [] };
                                 if (type === 'mention') await replyMessage.edit(payload);
                                 else await interaction.editReply(payload);
-                                savePromptToHistory(prompt, userTag, userId, `[TOOL: SEARCH_GAME - ${gameName}]`, interaction);
+                                reportConversation(prompt, userTag, userId, `[TOOL: SEARCH_GAME - ${gameName}]`, interaction);
                                 return;
                             } else {
                                 const pageSize = 5;
@@ -3145,7 +3157,7 @@ Como o projeto é open-source, você pode hospedar sua própria versão e ter co
                                         }
                                     });
                                 }
-                                savePromptToHistory(prompt, userTag, userId, `[TOOL: SEARCH_GAME - ${gameName}]`, interaction);
+                                reportConversation(prompt, userTag, userId, `[TOOL: SEARCH_GAME - ${gameName}]`, interaction);
                                 return;
                             }
                         } else {
@@ -3164,7 +3176,7 @@ Como o projeto é open-source, você pode hospedar sua própria versão e ter co
                             }
                             if (!payload) payload = buildHelpHomePayload();
                             await unifiedReply('', [], payload.components, payload.embeds);
-                            savePromptToHistory(prompt, userTag, userId, `[TOOL: GET_HELP]`, interaction);
+                            reportConversation(prompt, userTag, userId, `[TOOL: GET_HELP]`, interaction);
                             return;
                         } catch (err) {
                             processedResponse = `❌ Erro ao abrir ajuda: ${err.message}`;
@@ -3199,7 +3211,7 @@ Como o projeto é open-source, você pode hospedar sua própria versão e ter co
                         const { joinVoiceCall } = require('./voiceHandler');
                         await joinVoiceCall(member, textChannel, unifiedReply);
                     }
-                    savePromptToHistory(prompt, userTag, userId, `[TOOL: JOIN_VOICE_CALL (${rawMode})]`, interaction);
+                    reportConversation(prompt, userTag, userId, `[TOOL: JOIN_VOICE_CALL (${rawMode})]`, interaction);
                     return;
                 }
                 if (toolData.tool === 'leave_voice_call') {
@@ -3211,7 +3223,7 @@ Como o projeto é open-source, você pode hospedar sua própria versão e ter co
                         return;
                     }
                     await leaveVoiceCall(guildId, textChannel, unifiedReply);
-                    savePromptToHistory(prompt, userTag, userId, `[TOOL: LEAVE_VOICE_CALL]`, interaction);
+                    reportConversation(prompt, userTag, userId, `[TOOL: LEAVE_VOICE_CALL]`, interaction);
                     return;
                 }
                 if (toolData.tool === 'generate_reply') {
@@ -3866,7 +3878,7 @@ Responda APENAS com texto (NÃO USE JSON/TOOLS AGORA). Seja direto e informativo
                         
                         addToHistory(channelId, 'user', prompt);
                         addToHistory(channelId, 'assistant', `[Consulta Steam: ${steamInfo.name}] ${hikariComment}`);
-                        savePromptToHistory(prompt, userTag, userId, `[TOOL: CHECK_STEAM - "${steamInfo.name}"]`, interaction);
+                        reportConversation(prompt, userTag, userId, `[TOOL: CHECK_STEAM - "${steamInfo.name}"]`, interaction);
                         return;
                     }
                 }
@@ -3944,7 +3956,7 @@ Responda APENAS com texto (NÃO USE JSON/TOOLS AGORA). Seja direto e informativo
                         
                         addToHistory(channelId, 'user', prompt);
                         addToHistory(channelId, 'assistant', `[Converteu ${convInfo.amount} ${convInfo.from} para ${convInfo.to} -> ${resultFormatted}] ${hikariComment}`);
-                        savePromptToHistory(prompt, userTag, userId, `[TOOL: CONVERT_CURRENCY - "${amount} ${from} -> ${to}"]`, interaction);
+                        reportConversation(prompt, userTag, userId, `[TOOL: CONVERT_CURRENCY - "${amount} ${from} -> ${to}"]`, interaction);
                         return;
                     }
                 }
@@ -4052,7 +4064,7 @@ Responda APENAS com texto (NÃO USE JSON/TOOLS AGORA). Seja direto e informativo
                                 else await interaction.editReply(payload);
                                 addToHistory(channelId, 'user', prompt);
                                 addToHistory(channelId, 'assistant', `[Gerou imagem via ${imageData.modelName}] ${hikariComment}`);
-                                savePromptToHistory(prompt, userTag, userId, `[TOOL: GENERATE_IMAGE - "${imagePrompt}"]`, interaction);
+                                reportConversation(prompt, userTag, userId, `[TOOL: GENERATE_IMAGE - "${imagePrompt}"]`, interaction);
                                 return;
                             } else {
                                 processedResponse = '❌ Não consegui gerar a imagem agora. Pode ser que o serviço esteja lotado, ou acabou a quota, tente novamente mais tarde!';
@@ -4093,9 +4105,12 @@ Responda APENAS com texto (NÃO USE JSON/TOOLS AGORA). Seja direto e informativo
                                     .setLabel('⚖️ Solicitar Apelação')
                                     .setStyle(ButtonStyle.Secondary);
                                 const banRow = new ActionRowBuilder().addComponents(appealButton, githubButton);
-                                savePromptToHistory(prompt, userTag, userId, `[IA_AUTOMOD BAN - Severidade: ${severity}]`, interaction);
+                                reportConversation(prompt, userTag, userId, `[IA_AUTOMOD BAN - Severidade: ${severity}]`, interaction);
                                 const webhookUrl = config.avisosWebhookUrl;
-                                if (webhookUrl) {
+                                if (webhookUrl && effort() === 1) {
+                                    void sendSystemModerationNotice(webhookUrl, 'Um bloqueio foi aplicado pela moderação automática.');
+                                }
+                                if (webhookUrl && effort() === 2) {
                                     const alertEmbed = {
                                         title: '🤖 Banimento Aplicado Pela IA (AI AutoMod)',
                                         color: 0xE11D48,
@@ -4117,7 +4132,7 @@ Responda APENAS com texto (NÃO USE JSON/TOOLS AGORA). Seja direto e informativo
                                             { type: 2, style: 3, custom_id: `unban_user_${userId}_${userId}`, label: 'Desbanir Usuário' }
                                         ]
                                     }];
-                                    axios.post(webhookUrl, { embeds: [alertEmbed], components: alertComponents }).catch(() => {});
+                                    axios.post(webhookUrl, { embeds: [sanitizeModerationEmbed(alertEmbed)], components: alertComponents, allowed_mentions: { parse: [] } }).catch(() => {});
                                 }
                                 return await unifiedReply(null, [], [banRow], [banEmbed]);
                             }
@@ -4154,7 +4169,7 @@ Responda APENAS com texto (NÃO USE JSON/TOOLS AGORA). Seja direto e informativo
                                         }
                                     }
                                     channelVoiceCooldowns.set(channelId, Date.now());
-                                    savePromptToHistory(prompt, userTag, userId, `[TOOL: SEND_VOICE_NOTE - "${voiceData.cleanText}"]`, interaction);
+                                    reportConversation(prompt, userTag, userId, `[TOOL: SEND_VOICE_NOTE - "${voiceData.cleanText}"]`, interaction);
                                     addToHistory(channelId, 'user', (options.searchPrompt || prompt).substring(0, 300));
                                     addToHistory(channelId, 'assistant', voiceData.cleanText);
                                     console.log(`[AI/LLM] Mensagem de voz enviada privadamente/DM via Tool: send_voice_note (${duration})`);
@@ -4182,7 +4197,7 @@ Responda APENAS com texto (NÃO USE JSON/TOOLS AGORA). Seja direto e informativo
                                         try { await interaction.deleteReply(); } catch (_) {}
                                     }
                                     channelVoiceCooldowns.set(channelId, Date.now());
-                                    savePromptToHistory(prompt, userTag, userId, `[TOOL: SEND_VOICE_NOTE - "${voiceResult.cleanText}"]`, interaction);
+                                    reportConversation(prompt, userTag, userId, `[TOOL: SEND_VOICE_NOTE - "${voiceResult.cleanText}"]`, interaction);
                                     addToHistory(channelId, 'user', (options.searchPrompt || prompt).substring(0, 300));
                                     addToHistory(channelId, 'assistant', voiceResult.cleanText);
                                     console.log(`[AI/LLM] Mensagem de voz enviada via Tool: send_voice_note (${duration})`);
@@ -4250,7 +4265,7 @@ Responda APENAS com texto (NÃO USE JSON/TOOLS AGORA). Seja direto e informativo
                     interaction.radioClient || null
                 );
                 if (radioResult) await unifiedReply(radioResult);
-                savePromptToHistory(prompt, userTag, userId, `[TOOL: DETERMINISTIC_${fallbackTool.toUpperCase()}]`, interaction);
+                reportConversation(prompt, userTag, userId, `[TOOL: DETERMINISTIC_${fallbackTool.toUpperCase()}]`, interaction);
                 return;
             } else {
                 return;
@@ -4286,7 +4301,7 @@ Responda APENAS com texto (NÃO USE JSON/TOOLS AGORA). Seja direto e informativo
                     msg += '\n\n> **Como ativar:**\n> Vá em **Configurações do Discord → Privacidade e Segurança → Atividade de Status** e ative a opção **"Exibir atividade atual como mensagem de status"**.';
                 }
                 await unifiedReply(msg);
-                savePromptToHistory(prompt, userTag, userId, `[TOOL: DETERMINISTIC_GET_CURRENT_MUSIC - FAIL:${musicInfo.reason}]`, interaction);
+                reportConversation(prompt, userTag, userId, `[TOOL: DETERMINISTIC_GET_CURRENT_MUSIC - FAIL:${musicInfo.reason}]`, interaction);
                 return;
             }
             const isTargetOther = musicInfo.targetUser && musicInfo.targetUser.id !== userId;
@@ -4348,7 +4363,7 @@ Responda APENAS com texto (NÃO USE JSON/TOOLS AGORA). Seja direto e informativo
             } finally {
                 unlockUser(musicUserId);
             }
-            savePromptToHistory(prompt, userTag, userId, `[TOOL: DETERMINISTIC_GET_CURRENT_MUSIC - ${musicInfo.title}]`, interaction);
+            reportConversation(prompt, userTag, userId, `[TOOL: DETERMINISTIC_GET_CURRENT_MUSIC - ${musicInfo.title}]`, interaction);
             return;
         }
 
@@ -4455,7 +4470,7 @@ Responda APENAS com texto (NÃO USE JSON/TOOLS AGORA). Seja direto e informativo
                 await unifiedReply(processedResponse);
             }
             console.log(`[HISTORICO] Resposta IA (${duration}):\n${processedResponse}`);
-            savePromptToHistory(prompt, userTag, userId, processedResponse, interaction);
+            reportConversation(prompt, userTag, userId, processedResponse, interaction);
 
         }
 

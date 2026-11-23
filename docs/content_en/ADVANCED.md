@@ -86,7 +86,7 @@ Hikari's personality is not just text; it's a set of safety and behavior guideli
 
 ## 💡 Development Tips
 
-- 💡 **Thought Trace Logs:** Watch the console. Hikari prints the AI's `"thought"` before each tool action. If it's "hallucinating", adjust the tool description in the JSON.
+- Set `LOG_EFFORT=2` for restricted diagnostic logs. Return to `1` after diagnosing the issue.
 - 💡 **Permissions:** When creating tools that delete messages or manage roles, make sure the Bot has those permissions in Discord; otherwise, `discord.js` will throw a `Missing Permissions` error.
 - 💡 **JSON Sanitization:** Always pass the AI's outputs through a `JSON.parse` filter if you're requesting structured logs, as smaller models can "leak" keys like `{"response": "..."}` in the middle of the text.
 - 💡 **Internal Comments:** The bot uses recursive calls (`isInternalComment: true`) to generate natural speech after tool use, ensuring the AI always has a human "voice" after processing raw data.

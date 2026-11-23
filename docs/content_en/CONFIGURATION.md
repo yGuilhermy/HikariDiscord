@@ -50,7 +50,7 @@ All global constants are centralized for easier maintenance. Below are the prima
 | `geminiModel` | `GEMINI_MODEL` | Base model identifier (e.g., `gemini-1.5-flash`). |
 | `systemPrompt` | `SYSTEM_PROMPT` | The Core Context that defines the AI's behavior. |
 | `requireTos` | `REQUIRE_TOS` | If `true`, requires acceptance of terms when joining new servers. |
-| `saveHistory` | `SAVE_HISTORY` | If `true`, saves prompt and response logs to `history.txt`. |
+| Terminal and diagnostics | `LOG_EFFORT` | `0` essentials, `1` activity without private data (default), `2` detailed diagnosis. Prompts and responses are no longer written to TXT. |
 | `localLlmUrl` | `LOCAL_LLM_URL` | Endpoint for integration with LM Studio or Ollama. |
 | `defaultAutoMod` | `DEFAULT_AUTOMOD` | Enables or disables AutoMod by default for new servers (Default: `true`). |
 | `automodMode` | `AUTOMOD_MODE` | Defines the AutoMod operating mode (`off`, `trigger`, `mcp`, `both`). |
@@ -65,7 +65,7 @@ All global constants are centralized for easier maintenance. Below are the prima
 
 - 💡 **Permanent AI Database & Protection:** The permanent database (`src/data/ai_database.json`) features cascading access controls: if `AI_DB_READ` is `false`, write and delete operations are automatically blocked. Records marked with `protected: true` (such as creator biography) are immutable and can only be modified or deleted if the user is identified as the Bot Owner via `isOwner(userId)`.
 - 💡 **Local Rate Limiting:** If using local models via `LOCAL_LLM_URL`, you can configure the `timeout` within the `providerSettings` object in `llmHandler.js` to prevent queue hangups.
-- 💡 **Log Security:** `LOG_WEBHOOK_URL` captures `stderr` and `stdout`. Keep this webhook in a high-security private channel, as it displays error traces that may contain internal execution details.
+- **Log privacy.** Optional webhooks and telemetry follow the selected level. Restrict access to channels and terminal output when using level 2.
 - 💡 **Backward Compatibility:** The `ownerId` field (singular) in the config object will always point to the first ID in the list, ensuring that legacy modules continue to function.
 
 ---

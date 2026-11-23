@@ -13,7 +13,7 @@ module.exports = {
     name: 'ready',
     once: true,
     async execute(client) {
-        logger.system(`Sessão iniciada como ${client.user.tag} (ID: ${client.user.id})`);
+        logger.event('SYSTEM', 'online', `Sessão iniciada como ${client.user.tag} (ID: ${client.user.id})`);
         logger.discord(`Conectado a ${client.guilds.cache.size} servidores e ${client.users.cache.size} usuários em cache.`);
         
         setDiscordClient(client);

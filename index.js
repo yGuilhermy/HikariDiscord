@@ -4,17 +4,17 @@ const fs = require('fs');
 const path = require('path');
 const config = require('./src/config');
 const { logger, init } = require('./src/utils/logger');
+init(config.logWebhookUrl);
+
 const { startActivityUpdater } = require('./src/utils/activity');
 const { setDiscordClient } = require('./src/handlers/llmHandler');
 
-init(config.logWebhookUrl);
-
 process.on('unhandledRejection', (reason) => {
-    logger.error('SYSTEM', 'Rejeição de promessa não tratada', reason);
+    logger.event('ERROR', 'fatal', reason);
 });
 
 process.on('uncaughtException', (err) => {
-    logger.error('SYSTEM', 'Exceção não capturada', err);
+    logger.event('ERROR', 'fatal', err);
 });
 
 const client = new Client({
@@ -49,5 +49,5 @@ for (const file of eventFiles) {
 startActivityUpdater(client);
 
 client.login(config.discordToken).catch(err => {
-    logger.error('SYSTEM', 'Falha fatal durante login no Discord', err);
+    logger.event('ERROR', 'fatal', err);
 });

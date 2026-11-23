@@ -13,7 +13,6 @@ const defaultValues = {
     automodWhitelist: ['593372065730396160'],
     appealChannelId: '1483987324869017662',
     requireTos: false,
-    saveHistory: true,
     keepMusicEmbed: true,
     defaultAutoMod: true,
     automodMode: 'both',
@@ -64,7 +63,6 @@ const envMap = {
     AUTOMOD_WHITELIST: 'automodWhitelist',
     APPEAL_CHANNEL_ID: 'appealChannelId',
     REQUIRE_TOS: 'requireTos',
-    SAVE_HISTORY: 'saveHistory',
     KEEP_MUSIC_EMBED: 'keepMusicEmbed',
     DEFAULT_AUTOMOD: 'defaultAutoMod',
     AUTOMOD_MODE: 'automodMode',
@@ -158,7 +156,7 @@ for (const envKey of Object.keys(envMap)) {
             parsedVal = envVal.split(' ').map(f => f.trim()).filter(f => f);
         } else if (['requireTos', 'localLlmEnabled', 'voiceChatEnabled', 'voiceSpontaneousEnabled'].includes(configKey)) {
             parsedVal = envVal === 'true';
-        } else if (['saveHistory', 'defaultAutoMod', 'sendEnvironmentInfo', 'aiDbReadEnabled', 'aiDbWriteEnabled', 'aiDbEditEnabled', 'aiDbDeleteEnabled'].includes(configKey)) {
+        } else if (['defaultAutoMod', 'sendEnvironmentInfo', 'aiDbReadEnabled', 'aiDbWriteEnabled', 'aiDbEditEnabled', 'aiDbDeleteEnabled'].includes(configKey)) {
             parsedVal = envVal !== 'false';
         } else if (['voiceSpontaneousChance', 'voiceCooldownMinutes', 'voiceMaxChars', 'voiceSpeed', 'voiceTemperature'].includes(configKey)) {
             parsedVal = Number(envVal) || defaultValues[configKey];

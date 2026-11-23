@@ -13,7 +13,6 @@
   ],
   "appealChannelId": "1483987324869017662",
   "requireTos": true,
-  "saveHistory": true,
   "defaultAutoMod": true,
   "automodMode": "mcp",
   "sendEnvironmentInfo": true,

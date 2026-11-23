@@ -63,7 +63,7 @@ Este guia explica cada entrada do arquivo `.env` e as configurações internas d
 - **`LOCAL_LLM_URL`**: Endpoint do seu servidor local (LM Studio / Ollama). Padrão: `http://localhost:1234/v1/chat/completions`.
 - **`GEMINI_URL`**: URL da API do Gemini (OpenAI compatible).
 - **`HF_API_URL`**: Endpoint para inferência do HuggingFace.
-- **`LOG_WEBHOOK_URL`**: URL de um webhook do Discord para receber logs de erro e status direto no seu servidor.
+- **`LOG_WEBHOOK_URL`**: Webhook privado opcional de logs. Segue `LOG_EFFORT` e fica silencioso no nível 0.
 
 ---
 
@@ -73,7 +73,7 @@ Este guia explica cada entrada do arquivo `.env` e as configurações internas d
 - **`PREFIX`**: Prefixo para comandos legados (se houver). Padrão no código: `_`.
 - **`BOT_NAME`**: O nome que a Hikari reconhecerá como sendo dela.
 - **`REQUIRE_TOS`**: Se `true`, novos servidores precisam aceitar os termos de uso antes de usar o bot. O padrão no código é desativado.
-- **`SAVE_HISTORY`**: Salva o histórico de mensagens em `src/data/historico.txt` para depuração.
+- **`LOG_EFFORT`**: `0` inicialização e eventos essenciais, `1` operações sem dados da conversa (padrão), `2` diagnóstico detalhado com credenciais mascaradas.
 - **`AI_DB_READ`**: Habilita a leitura/consulta no banco de dados autônomo permanente (`true`/`false`).
 - **`AI_DB_WRITE`**: Habilita a gravação de novos dados no banco permanente (`true`/`false`).
 - **`AI_DB_EDIT`**: Habilita a edição de anotações no banco permanente (`true`/`false`).

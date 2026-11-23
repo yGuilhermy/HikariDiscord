@@ -50,7 +50,7 @@ Centralizamos todas as constantes globais para facilitar a manutenção. Abaixo,
 | `geminiModel` | `GEMINI_MODEL` | Identificador do modelo base (Ex: `gemini-1.5-flash`). |
 | `systemPrompt` | `SYSTEM_PROMPT` | O Core Context que define o comportamento da IA. |
 | `requireTos` | `REQUIRE_TOS` | Se `true`, exige aceitação dos termos ao entrar em novos servidores. |
-| `saveHistory` | `SAVE_HISTORY` | Se `true`, salva logs de prompt e resposta no arquivo `historico.txt`. |
+| Terminal e diagnóstico | `LOG_EFFORT` | `0` essencial, `1` atividade sem dados pessoais (padrão), `2` diagnóstico completo. Prompts e respostas deixaram de ser gravados em TXT. |
 | `localLlmUrl` | `LOCAL_LLM_URL` | Endpoint para integração com LM Studio ou Ollama. |
 | `defaultAutoMod` | `DEFAULT_AUTOMOD` | Habilita ou desabilita o AutoMod por padrão para novos servidores (Padrão: `true`). |
 | `automodMode` | `AUTOMOD_MODE` | Define o modo de operação do AutoMod (`off`, `trigger`, `mcp`, `both`). |
@@ -65,7 +65,7 @@ Centralizamos todas as constantes globais para facilitar a manutenção. Abaixo,
 
 - 💡 **Banco de Dados Permanente e Proteção:** O banco permanente (`src/data/ai_database.json`) conta com controle em cascata: se `AI_DB_READ` for `false`, as operações de escrita e exclusão são bloqueadas automaticamente. Registros com `protected: true` (como os dados do criador) são imutáveis e só podem ser sobrescritos ou apagados caso o usuário seja identificado como Dono via `isOwner(userId)`.
 - 💡 **Rate Limiting Local:** Se estiver usando modelos locais via `LOCAL_LLM_URL`, você pode configurar o `timeout` dentro do objeto `providerSettings` no `llmHandler.js` para evitar travamentos de fila.
-- 💡 **Segurança de Logs:** A `LOG_WEBHOOK_URL` captura `stderr` e `stdout`. Mantenha esse webhook em um canal privado de alta segurança, pois ele exibe traços de erro que podem conter detalhes internos da execução.
+- **Privacidade dos logs.** Webhooks e telemetria opcionais seguem o nível selecionado. Restrinja o acesso aos canais e à saída do terminal quando usar o nível 2.
 - 💡 **Retrocompatibilidade:** O campo `ownerId` (singular) no objeto config sempre apontará para o primeiro ID da lista, garantindo que módulos legados continuem funcionando.
 
 ---

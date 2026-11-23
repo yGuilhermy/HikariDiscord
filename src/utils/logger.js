@@ -1,5 +1,5 @@
 const axios = require('axios');
-const util = require('util');
+const { effort, redact, detailed, render, hookConsole: installConsole } = require('./logPolicy');
 
 const ANSI = {
     reset: '\x1b[0m',
@@ -170,25 +170,18 @@ function printToTerminal(item) {
     }
 }
 
-function enqueueLog(category, level, text, errorStack = null) {
-    const time = getTimeString();
-    const item = { time, category, level, text, errorStack };
-
+function enqueueLog(category, level, text, errorStack = null, event = null, status = null) {
+    const record = render(category.tag, level, [text], event, status);
+    if (!record) return;
+    const item = {
+        time: getTimeString(), category, level, text: record.text,
+        errorStack: effort() === 2 && errorStack ? redact(errorStack) : null
+    };
     printToTerminal(item);
 
-    if (!webhookUrl) return;
-
+    if (!webhookUrl || effort() === 0) return;
     logQueue.push(item);
-
-    if (level === 'ERROR' || level === 'FATAL') {
-        if (flushTimeout) {
-            clearTimeout(flushTimeout);
-            flushTimeout = null;
-        }
-        flushLogsToWebhook();
-    } else if (!flushTimeout) {
-        flushTimeout = setTimeout(flushLogsToWebhook, 3500);
-    }
+    if (!flushTimeout) flushTimeout = setTimeout(flushLogsToWebhook, 3500);
 }
 
 function splitIntoDiscordChunks(lines, maxLen = 1850) {
@@ -216,19 +209,11 @@ function splitIntoDiscordChunks(lines, maxLen = 1850) {
 }
 
 function sanitizePaths(text) {
-    if (typeof text !== 'string') return text;
-    return text
-        .replace(/[a-zA-Z0-9_\-]{24,}\.[a-zA-Z0-9_\-]{6,}\.[a-zA-Z0-9_\-]{27,}/g, '[DISCORD_TOKEN_REDACTED]')
-        .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]')
-        .replace(/(?:x-goog-api-key|apiKey|api_key|token)\s*[:=]\s*["']?([a-zA-Z0-9_\-]{16,})["']?/gi, '$1: [REDACTED]')
-        .replace(/([?&](?:key|apiKey|api_key)=)[^&\s]+/gi, '$1[REDACTED]')
-        .replace(/AIza[0-9A-Za-z-_]{35}/g, '[AIZA_KEY_REDACTED]')
-        .replace(/[A-Za-z]:\\[Uu]sers\\[^\\]+/g, 'C:\\Users\\***')
-        .replace(/\/home\/[^\/]+/g, '/home/***')
-        .replace(/```/g, '`\u200b`\u200b`');
+    return redact(text).replace(/```/g, '`\u200b`\u200b`');
 }
 
 async function flushLogsToWebhook() {
+    clearTimeout(flushTimeout);
     flushTimeout = null;
     if (isFlushing || !logQueue.length || !webhookUrl) return;
     isFlushing = true;
@@ -256,7 +241,8 @@ async function flushLogsToWebhook() {
 
         for (const chunk of chunks) {
             await axios.post(webhookUrl, {
-                content: `\`\`\`ansi\n${chunk}\n\`\`\``
+                content: `\`\`\`ansi\n${chunk}\n\`\`\``,
+                allowed_mentions: { parse: [] }
             }, { timeout: 8000 });
         }
 
@@ -278,47 +264,12 @@ async function flushLogsToWebhook() {
 function hookConsole() {
     if (isHooked) return;
     isHooked = true;
-
-    console.log = function (...args) {
-        const formatted = util.format(...args);
-        const clean = cleanString(formatted);
-        if (!clean) return;
-        const category = detectCategory(clean);
-        const text = cleanLegacyTags(clean);
-        enqueueLog(category, 'INFO', text);
-    };
-
-    console.info = function (...args) {
-        const formatted = util.format(...args);
-        const clean = cleanString(formatted);
-        if (!clean) return;
-        enqueueLog(CATEGORIES.INFO, 'INFO', cleanLegacyTags(clean));
-    };
-
-    console.warn = function (...args) {
-        const formatted = util.format(...args);
-        const clean = cleanString(formatted);
-        if (!clean) return;
-        enqueueLog(CATEGORIES.WARN, 'WARN', cleanLegacyTags(clean));
-    };
-
-    console.error = function (...args) {
-        let errStack = null;
-        const parts = [];
-        for (const arg of args) {
-            if (arg instanceof Error) {
-                errStack = arg.stack || arg.message;
-                parts.push(arg.message || String(arg));
-            } else if (typeof arg === 'object' && arg !== null) {
-                parts.push(util.inspect(arg, { depth: 2, colors: false }));
-            } else {
-                parts.push(String(arg));
-            }
-        }
-        const clean = cleanString(parts.join(' '));
-        if (!clean && !errStack) return;
-        enqueueLog(CATEGORIES.ERROR, 'ERROR', cleanLegacyTags(clean) || 'Erro capturado', errStack);
-    };
+    installConsole((level, args) => {
+        const text = effort() === 2 ? cleanLegacyTags(cleanString(detailed(args))) : '';
+        const prefix = typeof args[0] === 'string' ? args[0].match(/^\[[^\]]{1,32}\]/)?.[0] || '' : '';
+        const category = level === 'ERROR' ? CATEGORIES.ERROR : level === 'WARN' ? CATEGORIES.WARN : detectCategory(prefix);
+        enqueueLog(category, level, text);
+    });
 }
 
 function init(url) {
@@ -326,12 +277,18 @@ function init(url) {
         webhookUrl = url;
     }
     hookConsole();
-    logger.system('Logger centralizado inicializado com sucesso.');
+    logger.event('SYSTEM', 'starting');
 }
 
 const logger = {
     init,
     CATEGORIES,
+
+    event(categoryName, event, details, status) {
+        const category = CATEGORIES[categoryName] || CATEGORIES.SYSTEM;
+        const level = categoryName === 'ERROR' ? 'ERROR' : categoryName === 'WARN' ? 'WARN' : 'INFO';
+        enqueueLog(category, level, effort() === 2 && details !== undefined ? detailed([details]) : '', null, event, status);
+    },
 
     system(message, meta) {
         const text = meta ? `${message} ${typeof meta === 'object' ? JSON.stringify(meta) : meta}` : message;
@@ -346,7 +303,7 @@ const logger = {
     command(name, userTag, location, details) {
         const detailStr = details ? ` | ${typeof details === 'object' ? JSON.stringify(details) : details}` : '';
         const text = `/${name} • ${userTag} @ ${location}${detailStr}`;
-        enqueueLog(CATEGORIES.COMMAND, 'INFO', text);
+        enqueueLog(CATEGORIES.COMMAND, 'INFO', text, null, 'command');
     },
 
     ai(message, meta) {
@@ -425,5 +382,7 @@ module.exports = {
     logger,
     init,
     hookConsoleAndStreams,
-    sanitizePaths
+    flush: flushLogsToWebhook,
+    sanitizePaths,
+    effort
 };

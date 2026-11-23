@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { checkAutoBan } = require('./banHandler');
 const config = require('../config');
+const { effort: processLogEffort } = require('../utils/logPolicy');
 const { logger } = require('../utils/logger');
 const {
     EmbedBuilder,
@@ -367,7 +368,15 @@ async function handleTosInteraction(interaction) {
 async function reportNewGuild(guild) {
     if (!guild || !guild.id) return;
     const logWebhookUrl = config.avisosWebhookUrl;
-    if (logWebhookUrl) {
+    if (logWebhookUrl && processLogEffort() === 1) {
+        try {
+            const webhook = new WebhookClient({ url: logWebhookUrl });
+            await webhook.send({ content: 'Hikari adicionada a um servidor.', allowedMentions: { parse: [] } });
+        } catch {
+            logger.warn('DISCORD', 'Falha ao enviar aviso de entrada em servidor.');
+        }
+    }
+    if (logWebhookUrl && processLogEffort() === 2) {
         try {
             const webhook = new WebhookClient({ url: logWebhookUrl });
             let ownerTag = 'Desconhecido';
@@ -425,7 +434,7 @@ async function reportNewGuild(guild) {
             ];
             const mngRow = new ActionRowBuilder().addComponents(buttons);
 
-            await webhook.send({ embeds: [logEmbed], components: [mngRow] }).catch(e => {
+            await webhook.send({ embeds: [logEmbed], components: [mngRow], allowedMentions: { parse: [] } }).catch(e => {
                 logger.error('DISCORD', 'Falha ao enviar webhook de novo servidor', e);
             });
         } catch (err) {
