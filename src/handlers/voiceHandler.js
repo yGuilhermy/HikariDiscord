@@ -199,16 +199,20 @@ async function joinVoiceCall(member, textChannel, replyFn = null) {
 }
 
 async function leaveVoiceCall(guildId, textChannel = null, replyFn = null) {
-    try {
-        const { getSession } = require('../music/radioDatabase');
-        if (getSession(guildId)) {
-            const { leaveRadioCall } = require('../music/radioManager');
-            await leaveRadioCall(guildId, textChannel);
-        }
-    } catch (_) {}
+    const stateData = activeConnections.get(guildId);
+    const { getSession } = require('../music/radioDatabase');
+    const { leaveRadioCall } = require('../music/radioManager');
+    let leftRadio = false;
+    if (getSession(guildId)) {
+        if (stateData) stateData.isLeaving = true;
+        leftRadio = await leaveRadioCall(guildId, textChannel);
+    }
 
     const existingConn = getVoiceConnection(guildId);
-    const stateData = activeConnections.get(guildId);
+    if (!stateData && !existingConn && leftRadio) {
+        if (replyFn) await sendOrReply('✅ Saí do canal de voz.', textChannel, replyFn);
+        return true;
+    }
 
     if (!stateData && !existingConn) {
         await sendOrReply('ℹ️ Não estou em nenhum canal de voz neste servidor.', textChannel, replyFn);

@@ -1,234 +1,84 @@
-const { Readable } = require('stream');
-const { spawn } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+const { Readable } = require('node:stream');
+const { spawn } = require('node:child_process');
+const fs = require('node:fs');
 const config = require('../config');
 
 const SAMPLE_RATE = 48000;
 const CHANNELS = 2;
-const BYTES_PER_SAMPLE = 2;
-const BYTES_PER_SECOND = SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE;
-
-const DEFAULT_MIN_INITIAL_SEC = 1;
-const DEFAULT_MAX_BUFFER_SEC = 8;
-const DEFAULT_RESUME_BUFFER_SEC = 4;
-
-function isValidHttpUrl(string) {
-    if (!string || typeof string !== 'string') return false;
-    try {
-        const parsed = new URL(string);
-        return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-    } catch (_) {
-        return false;
-    }
-}
+const BYTES_PER_SECOND = SAMPLE_RATE * CHANNELS * 2;
 
 class YouTubeBufferStream extends Readable {
-    constructor(url, options = {}) {
-        super(options);
-        this.url = url;
-        this.bufferQueue = [];
-        this.bufferedBytes = 0;
-        this.isPausedReading = false;
-        this.isFinishedDownloading = false;
-        this.isBuffering = false;
-        this.destroyedStream = false;
-        this.isReady = false;
+    constructor(url, { signal, minBufferSec = 4, maxBufferSec = 8 } = {}) {
+        const minBytes = BYTES_PER_SECOND * minBufferSec;
+        super({ highWaterMark: Math.max(minBytes, BYTES_PER_SECOND * maxBufferSec), signal });
 
-        this.minInitialBytes = (options.minBufferSec || DEFAULT_MIN_INITIAL_SEC) * BYTES_PER_SECOND;
-        this.maxBufferBytes = (options.maxBufferSec || DEFAULT_MAX_BUFFER_SEC) * BYTES_PER_SECOND;
-        this.resumeBufferBytes = (options.resumeBufferSec || DEFAULT_RESUME_BUFFER_SEC) * BYTES_PER_SECOND;
+        this.ready = new Promise((resolve, reject) => {
+            this.resolveReady = resolve;
+            this.rejectReady = reject;
+        });
+        this.ready.catch(() => {});
+        this.on('error', () => {});
 
-        this.readyPromise = new Promise((resolve, reject) => {
-            this._resolveReady = resolve;
-            this._rejectReady = reject;
+        const cookies = config.ytdlpCookiesPath;
+        const cookieFlags = cookies && fs.existsSync(cookies) ? ['--cookies', cookies] : [];
+        this.downloader = spawn('yt-dlp', [
+            ...cookieFlags, ...(config.ytdlpExtraFlags || []),
+            '--no-playlist', '--no-update', '-f', 'bestaudio/best', '-o', '-', '--', url
+        ], { stdio: ['ignore', 'pipe', 'ignore'] });
+        this.decoder = spawn('ffmpeg', [
+            '-nostdin', '-i', 'pipe:0', '-f', 's16le',
+            '-ac', String(CHANNELS), '-ar', String(SAMPLE_RATE), 'pipe:1'
+        ], { stdio: ['pipe', 'pipe', 'ignore'] });
+
+        this.downloader.stdout.pipe(this.decoder.stdin);
+        this.decoder.stdin.on('error', error => {
+            if (error.code !== 'EPIPE') this.destroy(error);
+        });
+        let buffered = 0;
+        this.decoder.stdout.on('data', chunk => {
+            buffered += chunk.length;
+            if (!this.push(chunk)) this.decoder.stdout.pause();
+            if (buffered >= minBytes) this.resolveReady();
         });
 
-        this._startProcess();
-    }
-
-    _startProcess() {
-        if (!isValidHttpUrl(this.url)) {
-            const err = new Error('URL inválida: apenas http:// e https:// são permitidos');
-            if (this._rejectReady) {
-                const reject = this._rejectReady;
-                this._rejectReady = null;
-                reject(err);
-            }
-            process.nextTick(() => {
-                this.emit('error', err);
+        let closed = 0;
+        for (const [process, name] of [[this.downloader, 'yt-dlp'], [this.decoder, 'FFmpeg']]) {
+            process.on('error', error => this.destroy(error));
+            process.on('close', code => {
+                if (this.destroyed) return;
+                if (code !== 0) {
+                    this.destroy(new Error(name + ' encerrou com código ' + code));
+                } else if (++closed === 2) {
+                    if (buffered === 0) return this.destroy(new Error('O stream do YouTube não contém áudio.'));
+                    this.resolveReady();
+                    this.push(null);
+                }
             });
-            return;
-        }
-
-        const cookiesPath = config.ytdlpCookiesPath;
-        const cookieFlags = (cookiesPath && fs.existsSync(cookiesPath)) ? ['--cookies', cookiesPath] : [];
-        const extraFlags = config.ytdlpExtraFlags || [];
-
-        const ytdlpArgs = [
-            '--no-playlist',
-            '--no-warnings',
-            '--no-update',
-            '--buffer-size', '16k',
-            ...cookieFlags,
-            ...extraFlags,
-            '-o', '-',
-            '-f', 'bestaudio/best',
-            '--',
-            this.url
-        ];
-
-        const ffmpegArgs = [
-            '-i', 'pipe:0',
-            '-f', 's16le',
-            '-ac', String(CHANNELS),
-            '-ar', String(SAMPLE_RATE),
-            '-loglevel', 'quiet',
-            'pipe:1'
-        ];
-
-        this.ytdlpProcess = spawn('yt-dlp', ytdlpArgs);
-        this.ffmpegProcess = spawn('ffmpeg', ffmpegArgs);
-
-        this.ytdlpProcess.stdout.pipe(this.ffmpegProcess.stdin);
-
-        this.ffmpegProcess.stdout.on('data', (chunk) => {
-            if (this.destroyedStream) return;
-
-            this.bufferQueue.push(chunk);
-            this.bufferedBytes += chunk.length;
-
-            if (this._resolveReady && this.bufferedBytes >= this.minInitialBytes) {
-                this.isReady = true;
-                const resolve = this._resolveReady;
-                this._resolveReady = null;
-                resolve();
-            }
-
-            if (this.isBuffering && this.bufferedBytes >= this.minInitialBytes) {
-                this.isBuffering = false;
-            }
-
-            if (!this.isPausedReading && this.bufferedBytes >= this.maxBufferBytes) {
-                this.isPausedReading = true;
-                this.ffmpegProcess.stdout.pause();
-            }
-        });
-
-        this.ffmpegProcess.stdout.on('end', () => {
-            this.isFinishedDownloading = true;
-            if (this._resolveReady) {
-                this.isReady = true;
-                const resolve = this._resolveReady;
-                this._resolveReady = null;
-                resolve();
-            }
-        });
-
-        const handleError = (err) => {
-            if (this._rejectReady) {
-                const reject = this._rejectReady;
-                this._rejectReady = null;
-                reject(err);
-            }
-            this.destroy(err);
-        };
-
-        this.ytdlpProcess.on('error', handleError);
-        this.ffmpegProcess.on('error', handleError);
-
-        this.ytdlpProcess.on('exit', (code) => {
-            if (code !== 0 && !this.destroyedStream && !this.isFinishedDownloading && this.bufferedBytes === 0) {
-                handleError(new Error(`yt-dlp encerrou com codigo de erro: ${code}`));
-            }
-        });
-
-        this.ffmpegProcess.on('exit', (code) => {
-            if (code !== 0 && !this.destroyedStream && !this.isFinishedDownloading && this.bufferedBytes === 0) {
-                handleError(new Error(`ffmpeg encerrou com codigo de erro: ${code}`));
-            }
-        });
-
-        this.ytdlpProcess.stdin?.on('error', () => {});
-        this.ffmpegProcess.stdin?.on('error', () => {});
-    }
-
-    _read(size) {
-        if (this.destroyedStream) return;
-
-        if (this.bufferQueue.length > 0) {
-            const chunk = this.bufferQueue.shift();
-            this.bufferedBytes -= chunk.length;
-
-            if (this.isPausedReading && this.bufferedBytes <= this.resumeBufferBytes) {
-                this.isPausedReading = false;
-                if (this.ffmpegProcess && this.ffmpegProcess.stdout) {
-                    this.ffmpegProcess.stdout.resume();
-                }
-            }
-
-            this.push(chunk);
-        } else {
-            if (this.isFinishedDownloading) {
-                this.push(null);
-            } else {
-                this.isBuffering = true;
-                const silenceFrame = Buffer.alloc(Math.floor(BYTES_PER_SECOND * 0.02));
-                this.push(silenceFrame);
-            }
         }
     }
 
-    _destroy(err, callback) {
-        if (this.destroyedStream) return;
-        this.destroyedStream = true;
-        this.bufferQueue = [];
-        this.bufferedBytes = 0;
+    _read() {
+        this.decoder?.stdout.resume();
+    }
 
+    _destroy(error, callback) {
+        this.rejectReady?.(error || new Error('Stream encerrado.'));
+        for (const process of [this.downloader, this.decoder]) {
+            if (process && process.exitCode === null && process.signalCode === null) process.kill('SIGKILL');
+        }
+        callback(error);
+    }
+
+    async waitUntilReady(timeoutMs = 25000) {
+        let timer;
         try {
-            this.push(null);
-        } catch (_) {}
-
-        if (this.ytdlpProcess) {
-            try { this.ytdlpProcess.kill('SIGTERM'); } catch (_) {}
-            try { this.ytdlpProcess.kill('SIGKILL'); } catch (_) {}
+            await Promise.race([this.ready, new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new DOMException('Tempo limite do stream do YouTube.', 'TimeoutError')), timeoutMs);
+                timer.unref();
+            })]);
+        } finally {
+            clearTimeout(timer);
         }
-        if (this.ffmpegProcess) {
-            try { this.ffmpegProcess.kill('SIGTERM'); } catch (_) {}
-            try { this.ffmpegProcess.kill('SIGKILL'); } catch (_) {}
-        }
-
-        if (callback) callback(err);
-    }
-
-    waitUntilReady(timeoutMs = 25000) {
-        if (this.isReady || this.bufferedBytes >= this.minInitialBytes) {
-            return Promise.resolve();
-        }
-        if (this.destroyedStream) {
-            return Promise.reject(new Error('Stream destruido prematuramente'));
-        }
-
-        return new Promise((resolve, reject) => {
-            const timer = setTimeout(() => {
-                if (this._rejectReady) {
-                    const rejectFn = this._rejectReady;
-                    this._rejectReady = null;
-                    this._resolveReady = null;
-                    rejectFn(new Error('Timeout aguardando stream do YouTube'));
-                }
-            }, timeoutMs);
-
-            this.readyPromise
-                .then((val) => {
-                    clearTimeout(timer);
-                    resolve(val);
-                })
-                .catch((err) => {
-                    clearTimeout(timer);
-                    reject(err);
-                });
-        });
     }
 }
 
@@ -236,7 +86,4 @@ function createYouTubeProgressiveStream(url, options) {
     return new YouTubeBufferStream(url, options);
 }
 
-module.exports = {
-    YouTubeBufferStream,
-    createYouTubeProgressiveStream
-};
+module.exports = { YouTubeBufferStream, createYouTubeProgressiveStream };

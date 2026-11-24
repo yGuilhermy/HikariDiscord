@@ -1,129 +1,94 @@
-const fs = require('fs');
-const path = require('path');
+const fs = require('node:fs');
 const { getSession, peekNextTrack } = require('./radioDatabase');
-const { downloadTrackToDisk } = require('./radioProviders');
-const { TEMP_RADIO_DIR } = require('./radioCleaner');
+const { downloadTrackToDisk, resolvePlaybackTrack } = require('./radioProviders');
 
-const activePrefetchQueues = new Set();
-const prewarmedStreams = new Map();
-const TEMP_DIR = TEMP_RADIO_DIR;
+const downloads = new Map();
 
-function cleanupOrphanedAudioFiles() {
-    try {
-        if (fs.existsSync(TEMP_DIR)) {
-            const files = fs.readdirSync(TEMP_DIR);
-            for (const file of files) {
-                try {
-                    fs.unlinkSync(path.join(TEMP_DIR, file));
-                } catch (_) {}
+function sourceKey(track) {
+    return JSON.stringify([track.source, track.link || track.id || track.title, track.artist, !!track.preferDeezer]);
+}
+
+function getDownloads(session) {
+    if (!downloads.has(session)) downloads.set(session, new Map());
+    return downloads.get(session);
+}
+
+function getTrackAudio(guildId, track, signal, { existingOnly = false, source } = {}) {
+    const session = getSession(guildId);
+    if (!session || session._leaving || signal?.aborted) {
+        return existingOnly ? null : Promise.reject(signal?.reason || new Error('Sessão de rádio encerrada.'));
+    }
+    const key = sourceKey(track);
+    const cached = session.playlist.find(entry =>
+        entry.localPath && sourceKey(entry) === key && fs.existsSync(entry.localPath));
+    if (cached) {
+        track.localPath = cached.localPath;
+        return Promise.resolve(cached.localPath);
+    }
+
+    const jobs = getDownloads(session);
+    let job = jobs.get(key);
+    if (job?.controller.signal.aborted) job = null;
+    if (!job && existingOnly) return null;
+
+    if (!job) {
+        const controller = new AbortController();
+        const deadline = AbortSignal.any([controller.signal, AbortSignal.timeout(signal ? 60000 : 35000)]);
+        job = { controller, foreground: !!signal };
+        const current = job;
+        job.promise = (async () => {
+            const target = source || await resolvePlaybackTrack(track, deadline);
+            const file = await downloadTrackToDisk(target, { signal: deadline });
+            if (deadline.aborted || getSession(guildId) !== session || session._leaving) {
+                await fs.promises.unlink(file).catch(() => {});
+                deadline.throwIfAborted();
+                throw new Error('Sessão de rádio encerrada.');
             }
-        }
-    } catch (_) {}
-}
-
-cleanupOrphanedAudioFiles();
-
-function cleanupPrewarmedStream(guildId) {
-    const entry = prewarmedStreams.get(guildId);
-    if (entry) {
-        try {
-            if (entry.stream) entry.stream.destroy();
-        } catch (_) {}
-        prewarmedStreams.delete(guildId);
-    }
-}
-
-function getPrewarmedStream(guildId, link) {
-    const entry = prewarmedStreams.get(guildId);
-    if (entry && entry.link === link && entry.stream && !entry.stream.destroyedStream) {
-        prewarmedStreams.delete(guildId);
-        return entry.stream;
-    }
-    if (entry) {
-        cleanupPrewarmedStream(guildId);
-    }
-    return null;
-}
-
-async function downloadWithTimeout(track, timeoutMs = 35000) {
-    return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-            reject(new Error('Timeout no download da faixa'));
-        }, timeoutMs);
-
-        downloadTrackToDisk(track)
-            .then((filePath) => {
-                clearTimeout(timer);
-                resolve(filePath);
-            })
-            .catch((err) => {
-                clearTimeout(timer);
-                reject(err);
-            });
-    });
-}
-
-async function prefetchPlaylistTracks(guildId) {
-    if (activePrefetchQueues.has(guildId)) return;
-    activePrefetchQueues.add(guildId);
-
-    try {
-        const session = getSession(guildId);
-        if (!session || !Array.isArray(session.playlist) || session.playlist.length === 0) {
-            cleanupPrewarmedStream(guildId);
-            return;
-        }
-
-        const track = peekNextTrack(guildId);
-        if (!track) {
-            cleanupPrewarmedStream(guildId);
-            return;
-        }
-
-        cleanupPrewarmedStream(guildId);
-
-        if (track.localPath && fs.existsSync(track.localPath)) return;
-        if (track._prefetching) return;
-
-        track._prefetching = true;
-        try {
-            const filePath = await downloadWithTimeout(track, 35000);
-            track._prefetching = false;
-            if (filePath && fs.existsSync(filePath)) {
-                track.localPath = filePath;
+            for (const entry of session.playlist) {
+                if (sourceKey(entry) === key) entry.localPath = file;
             }
-        } catch (_) {
-            track._prefetching = false;
-        }
-    } catch (_) {
-    } finally {
-        activePrefetchQueues.delete(guildId);
+            return file;
+        })().finally(() => {
+            if (jobs.get(key) === current) jobs.delete(key);
+            if (!jobs.size && downloads.get(session) === jobs) downloads.delete(session);
+        });
+        jobs.set(key, job);
     }
+
+    if (!signal) return job.promise;
+    job.foreground = true;
+    const controller = job.controller;
+    const abort = () => controller.abort(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+    return job.promise.finally(() => signal.removeEventListener('abort', abort));
 }
 
 async function prefetchNextTrack(guildId) {
-    prefetchPlaylistTracks(guildId).catch(() => {});
+    const session = getSession(guildId);
+    if (!session) return;
+    const track = ['PLAYING', 'PAUSED'].includes(session.status) ? peekNextTrack(guildId) : null;
+    const key = track && track !== session.currentTrack ? sourceKey(track) : null;
+    for (const [jobKey, job] of downloads.get(session) || []) {
+        if (!job.foreground && jobKey !== key) job.controller.abort();
+    }
+    if (!key) return;
+    try {
+        await getTrackAudio(guildId, track);
+    } catch (_) {}
+}
+
+function cancelPrefetch(guildId) {
+    const jobs = downloads.get(getSession(guildId));
+    for (const job of jobs?.values() || []) job.controller.abort();
 }
 
 function cleanupSessionAudioFiles(session) {
-    if (!session || !Array.isArray(session.playlist)) return;
-    for (const track of session.playlist) {
-        if (track && track.localPath) {
-            try {
-                if (fs.existsSync(track.localPath)) {
-                    fs.unlinkSync(track.localPath);
-                }
-            } catch (_) {}
-            track.localPath = null;
+    for (const entry of session.playlist) {
+        if (entry.localPath) {
+            try { fs.unlinkSync(entry.localPath); } catch (_) {}
         }
     }
 }
 
-module.exports = {
-    prefetchNextTrack,
-    prefetchPlaylistTracks,
-    cleanupSessionAudioFiles,
-    cleanupOrphanedAudioFiles,
-    getPrewarmedStream,
-    cleanupPrewarmedStream
-};
+module.exports = { getTrackAudio, prefetchNextTrack, cancelPrefetch, cleanupSessionAudioFiles };

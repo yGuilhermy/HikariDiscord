@@ -1,4 +1,19 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, escapeMarkdown } = require('discord.js');
+
+const { peekNextTrack, canGoPrevious, playedIndices } = require('./radioDatabase');
+
+function safeText(value, maxLength, fallback = '—') {
+    const clip = text => text.slice(0, maxLength - 1).replace(/[\uD800-\uDBFF]$/, '');
+    const raw = String(value || fallback).slice(0, maxLength + 1).replace(/[\r\n\t]+/g, ' ').trim() || fallback;
+    const text = escapeMarkdown(raw.length > maxLength ? clip(raw) + '…' : raw);
+    return text.length <= maxLength ? text : clip(text).replace(/\\$/, '') + '…';
+}
+
+function thumbnail(embed, url) {
+    try {
+        if (['http:', 'https:'].includes(new URL(url).protocol)) embed.setThumbnail(url);
+    } catch (_) {}
+}
 
 function formatDuration(seconds) {
     if (!seconds || isNaN(seconds)) return '?:??';
@@ -54,7 +69,10 @@ function buildRadioEmbed(session) {
     const color = status === 'PLAYING' ? 0x1DB954 : status === 'BUFFERING' ? 0x3B82F6 : status === 'PAUSED' ? 0xF59E0B : 0x6B7280;
 
     const isHybrid = !!session.isHybrid;
-    const currentVoiceMode = session.voiceMode || (session.voiceListening ? (isHybrid ? 'HYBRID' : 'DIRECT') : 'OFF');
+    const currentVoiceMode = session.voiceMode;
+    const voiceLabel = voiceModeLabel(currentVoiceMode, isHybrid);
+    const effectiveVoiceLabel = session.voiceDisabled ? '🔒 Escuta desativada no servidor' :
+        session.voiceCooldownUntil > Date.now() && currentVoiceMode !== 'OFF' ? voiceLabel + ' · escuta em espera' : voiceLabel;
 
     const embed = new EmbedBuilder()
         .setColor(color)
@@ -67,23 +85,25 @@ function buildRadioEmbed(session) {
     if (track) {
         embed.setDescription(`**${statusLabel}** (Faixa #${currentPos} de ${playlist.length})`)
             .addFields(
-                { name: '🎵 Faixa Atual', value: `**#${currentPos}. ${track.title}** - ${track.artist}\n\n`, inline: false },
+                { name: '🎵 Faixa Atual', value: `**#${currentPos}. ${safeText(track.title, 475)}** — ${safeText(track.artist, 475)}`, inline: false },
                 { name: '⏱️ Duração', value: formatDuration(track.duration), inline: true },
-                { name: '📂 Álbum', value: track.album || '—', inline: true },
+                { name: '📂 Álbum', value: safeText(track.album, 256), inline: true },
                 { name: '📋 Playlist Total', value: `${playlist.length} faixa(s)`, inline: true },
                 { name: '🎲 Shuffle', value: session.shuffle ? '✅ Ativo' : '❌ Off', inline: true },
                 { name: '🔁 Loop', value: loopLabel(session.loopMode), inline: true },
                 { name: '🚀 Busca', value: streamModeText, inline: true },
-                { name: '🎙️ Voz', value: voiceModeLabel(currentVoiceMode, isHybrid), inline: true }
+                { name: '🎙️ Voz', value: effectiveVoiceLabel, inline: true }
             );
-        if (track.cover) embed.setThumbnail(track.cover);
-        if (track.addedBy) embed.addFields({ name: '➕ Adicionada por', value: `<@${track.addedBy}>`, inline: true });
+        thumbnail(embed, track.cover);
+        if (/^\d+$/.test(track.addedBy || '')) embed.addFields({ name: '➕ Adicionada por', value: `<@${track.addedBy}>`, inline: true });
     } else {
-        embed.setDescription(`**${statusLabel}**\n\nNenhuma faixa tocando. Playlist com ${playlist.length} música(s). Use ➕ para adicionar!\n🚀 **Modo de Busca:** ${streamModeText}\n🎙️ **Modo de Voz:** ${voiceModeLabel(currentVoiceMode, isHybrid)}`);
+        embed.setDescription(`**${statusLabel}**\n\nNenhuma faixa tocando. Playlist com ${playlist.length} música(s). Use ➕ para adicionar!\n🚀 **Modo de Busca:** ${streamModeText}\n🎙️ **Modo de Voz:** ${effectiveVoiceLabel}`);
     }
 
-    const prevDisabled = !playlist.length || session.currentIndex <= 0;
-    const nextDisabled = !playlist.length || (session.currentIndex >= playlist.length - 1 && session.loopMode !== 'QUEUE');
+    if (session.playbackError) embed.addFields({ name: 'Falha na reprodução', value: session.playbackError });
+
+    const prevDisabled = !canGoPrevious(session);
+    const nextDisabled = !peekNextTrack(session.guildId, { reason: 'manual' });
     const stopDisabled = status === 'STOPPED';
     const shuffleDisabled = playlist.length <= 1;
     const removeDisabled = playlist.length === 0;
@@ -91,7 +111,8 @@ function buildRadioEmbed(session) {
 
     const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('radio_prev').setLabel('⏮️').setStyle(ButtonStyle.Secondary).setDisabled(prevDisabled),
-        new ButtonBuilder().setCustomId('radio_playpause').setEmoji(status === 'PLAYING' ? '⏸️' : '▶️').setLabel(status === 'PLAYING' ? 'Pausar' : 'Play').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('radio_playpause').setEmoji(status === 'PLAYING' ? '⏸️' : '▶️').setLabel(status === 'BUFFERING' ? 'Carregando' : status === 'PLAYING' ? 'Pausar' : 'Play')
+            .setStyle(ButtonStyle.Primary).setDisabled(!playlist.length || status === 'BUFFERING'),
         new ButtonBuilder().setCustomId('radio_stop').setLabel('⏹️').setStyle(ButtonStyle.Danger).setDisabled(stopDisabled),
         new ButtonBuilder().setCustomId('radio_next').setLabel('⏭️').setStyle(ButtonStyle.Secondary).setDisabled(nextDisabled),
         new ButtonBuilder().setCustomId('radio_shuffle').setLabel('🔀 Shuffle').setStyle(session.shuffle ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(shuffleDisabled)
@@ -122,7 +143,7 @@ function buildQueueEmbed(session, page = 1) {
 
     const embed = new EmbedBuilder()
         .setColor(0x7C3AED)
-        .setTitle('📋 Fila Permanente do Rádio')
+        .setTitle('📋 Fila do Rádio')
         .setFooter({ text: `Página ${safePage}/${totalPages} • ${playlist.length} faixa(s) cadastradas` });
 
     if (playlist.length === 0) {
@@ -133,19 +154,22 @@ function buildQueueEmbed(session, page = 1) {
     const startIndex = (safePage - 1) * 10;
     const pageTracks = playlist.slice(startIndex, startIndex + 10);
 
+    const played = playedIndices(session);
     let desc = '';
     pageTracks.forEach((t, relativeIndex) => {
         const absoluteIndex = startIndex + relativeIndex;
         const pos = absoluteIndex + 1;
         const dur = formatDuration(t.duration);
         if (absoluteIndex === currentIdx && session.status === 'PLAYING') {
-            desc += `**▶️ #${pos}. ${t.title} — ${t.artist}** (tocando agora)\n`;
+            desc += `**▶️ #${pos}. ${safeText(t.title, 190)} — ${safeText(t.artist, 130)}** (tocando agora)\n`;
         } else if (absoluteIndex === currentIdx && session.status === 'PAUSED') {
-            desc += `**⏸️ #${pos}. ${t.title} — ${t.artist}** (pausada)\n`;
-        } else if (absoluteIndex < currentIdx) {
-            desc += `~~#${pos}. ${t.title} — ${t.artist}~~\n`;
+            desc += `**⏸️ #${pos}. ${safeText(t.title, 190)} — ${safeText(t.artist, 130)}** (pausada)\n`;
+        } else if (absoluteIndex === currentIdx && session.status === 'BUFFERING') {
+            desc += `**⏳ #${pos}. ${safeText(t.title, 190)} — ${safeText(t.artist, 130)}** (carregando)\n`;
+        } else if (played.has(absoluteIndex)) {
+            desc += `~~#${pos}. ${safeText(t.title, 190)} — ${safeText(t.artist, 130)}~~\n`;
         } else {
-            desc += `**#${pos}.** ${t.title} — ${t.artist} (${dur})\n`;
+            desc += `**#${pos}.** ${safeText(t.title, 190)} — ${safeText(t.artist, 130)} (${dur})\n`;
         }
     });
 
@@ -154,8 +178,8 @@ function buildQueueEmbed(session, page = 1) {
     const components = [];
     if (totalPages > 1) {
         const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`radio_qpage_${safePage - 1}`).setLabel('⬅️ Anterior').setStyle(ButtonStyle.Secondary).setDisabled(safePage <= 1),
-            new ButtonBuilder().setCustomId(`radio_qpage_${safePage + 1}`).setLabel('Próxima ➡️').setStyle(ButtonStyle.Secondary).setDisabled(safePage >= totalPages)
+            new ButtonBuilder().setCustomId(`radio_qpage_${session.id}_${safePage - 1}`).setLabel('⬅️ Anterior').setStyle(ButtonStyle.Secondary).setDisabled(safePage <= 1),
+            new ButtonBuilder().setCustomId(`radio_qpage_${session.id}_${safePage + 1}`).setLabel('Próxima ➡️').setStyle(ButtonStyle.Secondary).setDisabled(safePage >= totalPages)
         );
         components.push(row);
     }
@@ -170,12 +194,12 @@ function buildAmbiguousEmbed(results) {
         .setDescription('Não achei a correta com certeza. Escolha uma das opções abaixo:')
         .setFooter({ text: 'Powered by Deezer' });
 
-    if (results[0]?.cover) embed.setThumbnail(results[0].cover);
+    thumbnail(embed, results[0]?.cover);
 
-    results.forEach((t, i) => {
+    results.slice(0, 10).forEach((t, i) => {
         embed.addFields({
-            name: `${i + 1}. ${t.title}`,
-            value: `👤 ${t.artist} | ⏱️ ${formatDuration(t.duration)}`,
+            name: `${i + 1}. ${safeText(t.title, 210)}`,
+            value: `👤 ${safeText(t.artist, 180)} | ⏱️ ${formatDuration(t.duration)}`,
             inline: false
         });
     });
@@ -187,7 +211,7 @@ function buildNotFoundEmbed(query) {
     return new EmbedBuilder()
         .setColor(0xE11D48)
         .setTitle('❌ Música não encontrada')
-        .setDescription(`Não consegui encontrar **"${query}"** nos serviços de música.`)
+        .setDescription(`Não consegui encontrar **"${safeText(query, 350)}"** nos serviços de música.`)
         .setFooter({ text: 'Hikari Radio' });
 }
 
@@ -198,5 +222,6 @@ module.exports = {
     buildNotFoundEmbed,
     formatDuration,
     voiceModeLabel,
-    voiceButtonStyle
+    voiceButtonStyle,
+    safeText
 };

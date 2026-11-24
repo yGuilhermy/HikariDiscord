@@ -1,6 +1,6 @@
 const { toolFooter: formatToolFooter, progressEmbed } = require('./mcpPresentation');
 const { readTools, firstTools, buildBatch, readPlan, resultContext, steamPriceDependency } = require('./mcpPlan');
-const { searchRequest, usableToolReply, limitMentions, profileRequest } = require('./conversationContext');
+const { searchRequest, usableToolReply, limitMentions, isActionPromise } = require('./conversationContext');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const fs = require('fs');
@@ -638,66 +638,6 @@ function isHikariSelfPortraitIntent(userText, imagePrompt = '') {
         /\b(?:portrait\s+of\s+hikari|drawing\s+of\s+hikari|anime\s+girl\s+hikari|hikari\s+herself|the\s+character\s+hikari)\b/i.test(rawImage) ||
         /^(?:hikari|hikari\s+anime\s+girl)(?:,\s*.*)?$/i.test(rawImage.trim());
     return isSelfSubjectInUserText || isSelfSubjectInImagePrompt;
-}
-function extractMcpTargetAndArgs(userText, channelId, userId, context) {
-    if (!userText || !/\bmcp\b/i.test(userText)) return null;
-    const cleanText = userText.trim().replace(/^hikari[,:\s]+/iu, '');
-    if (!/^mcp(?:\s|:)/iu.test(cleanText)) return null;
-    const mcpMatch = cleanText.match(/\bmcp\s+(?:de\s+)?([a-z_]+)(?:[\s:]+(?:para|pra|sobre|de)?[\s:]*(.*))?$/i)
-        || cleanText.match(/\bmcp[:\s]+([a-z_]+)(?:[\s:]+(?:para|pra|sobre|de)?[\s:]*(.*))?$/i);
-    if (!mcpMatch) return null;
-    const rawToolKey = mcpMatch[1].toLowerCase();
-    let explicitArg = (mcpMatch[2] || '').trim();
-    explicitArg = explicitArg.replace(/^(?:para|pra|sobre|de|for|about|:)[\s:]+/i, '').trim();
-    explicitArg = explicitArg.replace(/^['"](.*)['"]$/, '$1').trim();
-    const previous = [...getHistory(channelId, userId)].reverse().find(item => item.role === 'user' && !/\bmcp\b/i.test(item.content));
-    const query = explicitArg || context?.referenceTopic || context?.previousTopic || previous?.content || '';
-    const urlInQuery = query.match(/https?:\/\/\S+/i)?.[0] || userText.match(/https?:\/\/\S+/i)?.[0] || '';
-    if (['status', 'status_musica', 'musica_status', 'get_current_music', 'current_music'].includes(rawToolKey) ||
-        (['musica', 'música', 'baixar', 'ouvir', 'escutar'].includes(rawToolKey) && (/\b(?:status|spotify|ouvindo|escutando)\b/i.test(cleanText) || /<@!?\d+>/.test(cleanText)))) {
-        const userMatch = cleanText.match(/<@!?(\d{17,20})>/) || explicitArg.match(/(?:de|do|da|user|usuario)\s+([^\s]+)/i) || (explicitArg && !/\b(?:musica|música|audio|áudio|status|que|estou|to|tá|ta)\b/i.test(explicitArg) ? explicitArg.match(/\b([a-z0-9_]+)\b/i) : null);
-        const selfWords = /\b(meu|minha|eu|comigo|estou|t[oô]|me)\b/i.test(cleanText);
-        const targetUser = (!selfWords && userMatch) ? (userMatch[1] || userMatch[0]).replace(/^[<@!>]+|[>]+$/g, '') : null;
-        return { tool: 'get_current_music', args: { download: true, user: targetUser } };
-    }
-    if (['pesquisa', 'pesquisar', 'busca', 'buscar', 'web', 'google', 'search', 'search_web'].includes(rawToolKey)) {
-        return { tool: 'search_web', args: { query: query || 'notícias' } };
-    }
-    if (['musica', 'música', 'music', 'audio', 'áudio', 'som', 'faixa', 'song', 'deezer', 'spotify', 'search_and_download_music', 'download_audio'].includes(rawToolKey)) {
-        if (urlInQuery) {
-            return { tool: 'download_audio', args: { url: urlInQuery } };
-        }
-        return { tool: 'search_and_download_music', args: { query: query || 'musica' } };
-    }
-    if (['video', 'vídeo', 'clipe', 'clip', 'reel', 'shorts', 'tiktok', 'twitter', 'tweet', 'x', 'download_video'].includes(rawToolKey)) {
-        return { tool: 'download_video', args: { url: urlInQuery || query } };
-    }
-    if (['imagem', 'foto', 'arte', 'desenho', 'ilustracao', 'ilustração', 'wallpaper', 'avatar', 'pfp', 'image', 'generate_image'].includes(rawToolKey)) {
-        return { tool: 'generate_image', args: { prompt: query || 'uma arte detalhada', negative_prompt: 'nsfw, nude, explicit, gore, violence, blood, adult content, 18+, pornographic' } };
-    }
-    if (['jogo', 'game', 'torrent', 'crack', 'repack', 'search_game'].includes(rawToolKey)) {
-        return { tool: 'search_game', args: { game_name: query || 'game', direct: true } };
-    }
-    if (['steam', 'check_steam'].includes(rawToolKey)) {
-        return { tool: 'check_steam', args: { game: query || 'game' } };
-    }
-    if (['moeda', 'cotacao', 'cotação', 'cambio', 'câmbio', 'conversao', 'conversão', 'convert_currency'].includes(rawToolKey)) {
-        return { tool: 'convert_currency', args: { query: query } };
-    }
-    if (['voz', 'call', 'conectar', 'entrar', 'join_voice_call'].includes(rawToolKey)) {
-        let mode = 'conversa';
-        const qLower = (query || '').toLowerCase();
-        if (qLower.includes('hibrid') || qLower.includes('híbrid')) {
-            mode = 'hibrido';
-        } else if (qLower.includes('radio') || qLower.includes('rádio') || qLower.includes('musica') || qLower.includes('música')) {
-            mode = 'radio';
-        }
-        return { tool: 'join_voice_call', args: { mode } };
-    }
-    if (['sair', 'desconectar', 'desconectar_voz', 'leave_voice_call'].includes(rawToolKey)) {
-        return { tool: 'leave_voice_call', args: {} };
-    }
-    return null;
 }
 function setDiscordClient(client) {
     discordClient = client;
@@ -1673,7 +1613,9 @@ VOCÊ DEVE ADERIR A ESSA NOVA PERSONA ACIMA DE TUDO.\n`;
                         "É ESTRITAMENTE PROIBIDO responder com saudações, conversas casuais ou frases como 'E aí, blz?', 'oi', 'oque você precisa'.\n" +
                         "Você DEVE SEMPRE chamar uma ferramenta MCP em formato JSON.\n\n" +
                         "MAPEAMENTO DE COMANDOS:\n" +
-                        "- 'para', 'pare', 'parar', 'pause', 'pausa', 'desliga', 'stop', 'silêncio' -> radio_pause_resume\n" +
+                        "- Pedidos de pausa -> radio_pause_resume com action: 'pause'. Pedidos de retomar -> action: 'resume'.\n" +
+                        "- Pedidos de parar -> radio_stop_music e mantém a fila.\n" +
+                        "- Se a fala negar uma ação (ex.: 'não pula'), use radio_unknown_command.\n" +
                         "- 'toca X', 'coloca X', 'play X', 'música X', 'som' -> radio_play_music\n" +
                         "- 'pula', 'passa', 'próxima', 'next' -> radio_next_track\n" +
                         "- 'volta', 'anterior' -> radio_prev_track\n" +
@@ -1692,9 +1634,10 @@ VOCÊ DEVE ADERIR A ESSA NOVA PERSONA ACIMA DE TUDO.\n`;
                 if (options.hybridMode || options.isHybridVoice) {
                     effectiveSystemPrompt += "\n[MODO HÍBRIDO DE VOZ E RÁDIO ATIVADO]:\n" +
                         "Você está operando simultaneamente como assistente conversacional no chat e controladora do player de rádio.\n" +
+                        "- Respeite negativas, como 'não pula essa', sem executar a ação negada.\n" +
                         "- Se o usuário pedir para tocar música ou controlar o rádio, use a ferramenta MCP correspondente:\n" +
                         "  * radio_play_music: args { \"query\": \"nome da música ou artista\" }\n" +
-                        "  * radio_pause_resume: args {}\n" +
+                        "  * radio_pause_resume: args { \"action\": \"pause\" ou \"resume\" }\n" +
                         "  * radio_stop_music: args {}\n" +
                         "  * radio_next_track: args {}\n" +
                         "  * radio_prev_track: args {}\n" +
@@ -1779,6 +1722,7 @@ ${prompt}
     telemetryLogger.error('Todos os provedores de IA falharam');
     return `⚡ **Limites de Processamento Atingidos:** Todos os nossos provedores de IA atingiram a cota temporária de tokens ou estão temporariamente indisponíveis. Tente interagir novamente daqui algumas horas! ✨`;
 }
+const TOOL_SELECTION_GUIDANCE = 'Escolha as ferramentas pela intenção do pedido, mesmo com gírias ou erros de digitação. Execute a ferramenta em vez de prometer. Por exemplo, pesquisar um jogo na Steam e converter o preço pede primeiro check_steam. A conversão depende do preço encontrado. Use a definição de cada MCP para mídia, pesquisa, imagens, áudio, memória, jogos e outras ações disponíveis. Se o usuário citar um MCP pelo nome, considere esse nome na seleção. Pedidos como “pesquisa isso” usam a mensagem citada; sem assunto identificável, peça esclarecimento. Use db_read com chave personal_preferences para gostos do autor atual, creator_info para criadores e hikari_info para a Hikari. Preserve o assunto e os argumentos do pedido original.';
 const MEMORY_MUTATIONS = new Set(['db_write', 'db_edit', 'db_delete']);
 
 async function executeAgentLoop(initialTools, initialThought, prompt, channelId, userId, userTag, interaction, type, unifiedReply, replyMessage, modelFooter, duration, options, guildId, guildName, channelName) {
@@ -1930,8 +1874,8 @@ ${result.formatted}` : result.message);
                     if (!result.success) memoryOutcomes.push(result.message);
                 } else if (item.tool === 'db_read' || item.tool === 'get_creator_info') {
                     const key = item.tool === 'get_creator_info' ? 'creator_info' : item.args?.key ?? item.args?.chave;
-                    const result = readDb(key, targetGuildId, memoryActor);
-                    const subject = key === 'creator_info' ? 'Dados oficiais sobre os criadores'
+                    const result = key === 'personal_preferences' ? readPersonalNotes(targetGuildId, memoryActor) : readDb(key, targetGuildId, memoryActor);
+                    const subject = key === 'personal_preferences' ? 'Preferências do autor atual' : key === 'creator_info' ? 'Dados oficiais sobre os criadores'
                         : key === 'hikari_info' ? 'Dados oficiais da Hikari' : 'Anotações do contexto';
                     collectedResults.push(result.success ? `[${subject}]:
 ${result.formatted.slice(0, 16000)}` : result.message);
@@ -2358,26 +2302,8 @@ Como o projeto é open-source, você pode hospedar sua própria versão e ter co
         }
         const startTime = Date.now();
         console.log(`[HISTORICO] Prompt IA (${guildName} #${channelName} | ${userTag} [${userId}]):\n${prompt}`);
-        const requestText = options.memoryRequest ?? options.searchPrompt ?? queueItem.prompt;
-        const previousUser = [...getHistory(channelId, userId)].reverse().find(item => item.role === 'user')?.content;
-        const search = searchRequest(requestText, { ...options.conversation,
-            previousTopic: options.conversation?.previousTopic || previousUser });
-        const profile = profileRequest(requestText);
-        const explicit = search ? (search.query ? { tool: 'search_web', args: { query: search.query } } : null)
-            : extractMcpTargetAndArgs(requestText, channelId, userId, options.conversation) ||
-                (profile === 'personal' ? { tool: 'db_read_personal', args: {} }
-                    : profile ? { tool: 'db_read', args: { key: profile === 'creator' ? 'creator_info' : 'hikari_info' } } : null);
         const dispatchExplicitly = !options.disableTools && !options.radioMode && !options.hybridMode;
-        if (dispatchExplicitly) {
-            if (search && !search.query) return unifiedReply('Qual assunto você quer que eu pesquise?');
-            if (explicit && isToolDisabled(options.guildId || guildId, explicit.tool === 'db_read_personal' ? 'db_read' : explicit.tool)) {
-                return unifiedReply('Essa ferramenta está desativada neste servidor.');
-            }
-            if (explicit && ['search_web', 'check_steam', 'convert_currency', 'db_read', 'db_read_personal'].includes(explicit.tool)) {
-                return executeAgentLoop([explicit], '', prompt, channelId, userId, userTag, interaction, type,
-                    unifiedReply, replyMessage, '', '0s', options, guildId, guildName, channelName);
-            }
-        }
+        const routingPrompt = dispatchExplicitly ? `${prompt}\n\n${TOOL_SELECTION_GUIDANCE}` : prompt;
         let rawResponse;
         let isBlocked = false;
         let attemptsLeft = getErrorRetries();
@@ -2385,9 +2311,7 @@ Como o projeto é open-source, você pode hospedar sua própria versão e ter co
         let lastAttemptTime = 0;
         let lastAttemptKey = '';
         do {
-            rawResponse = dispatchExplicitly && explicit
-                ? JSON.stringify(explicit)
-                : await generateResponse(prompt, channelId, {
+            rawResponse = await generateResponse(routingPrompt, channelId, {
                 ...options,
                 guildId: options.guildId || guildId,
                 allowSearch: false,
@@ -2489,149 +2413,18 @@ Como o projeto é open-source, você pode hospedar sua própria versão e ter co
         let processedResponse = rawResponse;
         if (!options.radioMode && !options.disableTools) {
             const rawHasJson = /\{[\s\S]*\}/.test(rawResponse);
-            const lowerRaw = rawResponse.toLowerCase().replace(/\n-# .*$/gm, '').trim();
-            const lowerSearchPrompt = (options.searchPrompt || prompt).toLowerCase();
-            const normSearchPrompt = lowerSearchPrompt.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-            const hasUrl = /https?:\/\//i.test(lowerSearchPrompt);
-            const urlInPrompt = (options.searchPrompt || prompt).match(/https?:\/\/\S+/i)?.[0] || '';
-            const ACTION_TOOLS = [
-                {
-                    tool: 'download_audio',
-                    test: () => hasUrl && /\b(áudio|audio|mp3|som|baixa|download)\b/.test(lowerSearchPrompt) && !/\b(vídeo|video|mp4)\b/.test(lowerSearchPrompt),
-                    args: () => ({ url: urlInPrompt })
-                },
-                {
-                    tool: 'download_video',
-                    test: () => hasUrl && /\b(vídeo|video|mp4|reel|short|tiktok)\b/.test(lowerSearchPrompt),
-                    args: () => ({ url: urlInPrompt })
-                },
-                {
-                    tool: 'get_current_music',
-                    test: () => !hasUrl && /\b(?:status|spotify|que\s+(?:eu|<@!?\d+>|\w+)\s+t[aá]\s+(?:ouvindo|escutando)|estou\s+ouvindo|to\s+ouvindo|ta\s+ouvindo)\b/i.test(lowerSearchPrompt),
-                    args: () => {
-                        const src = options.searchPrompt || prompt;
-                        const mentionMatch = src.match(/<@!?(\d{17,20})>/);
-                        const selfWords = /\b(meu|minha|eu|comigo|estou|t[oô]|me)\b/i.test(src);
-                        const user = (mentionMatch && !selfWords) ? mentionMatch[1] : null;
-                        return { download: true, user };
-                    }
-                },
-                {
-                    tool: 'search_and_download_music',
-                    test: () => !hasUrl && !/\b(status|spotify|ouvindo|escutando)\b/i.test(lowerSearchPrompt) && (/\b(baixa|baixe|download|quero|me manda)\b.{0,30}\b(música|musica|music|song|faixa)\b|\b(música|musica|music|song)\b.{0,30}\b(baixa|baixe|download)\b/i.test(lowerSearchPrompt)),
-                    args: () => {
-                        const src = options.searchPrompt || prompt;
-                        const m = src.match(/(?:baixa|baixe|baixar|download|quero|me manda)[^:]*?(?:música|musica|music|song|faixa)?[:\s]+(.+)/i)
-                            || src.match(/(?:música|musica|song)\s+(.+)/i);
-                        return { query: (m ? m[1] : src).trim().substring(0, 120) };
-                    }
-                },
-                {
-                    tool: 'search_game',
-                    test: () => /\b(baixa|baixe|download|torrent|crack|pirat)\b.{0,40}\b(jogo|game)\b|\b(jogo|game)\b.{0,40}\b(baixa|baixe|download|torrent|crack)\b/i.test(lowerSearchPrompt) && !/\b(mobile|android|ios|console|playstation|xbox)\b/i.test(lowerSearchPrompt),
-                    args: () => {
-                        const src = options.searchPrompt || prompt;
-                        const m = src.match(/(?:jogo|game)[:\s]+(.+)/i) || src.match(/(?:baixa|torrent|crack)\s+(?:o\s+)?(?:jogo\s+)?(.+)/i);
-                        return { game_name: (m ? m[1] : src).trim().substring(0, 80), direct: true };
-                    }
-                },
-                {
-                    tool: 'generate_image',
-                    test: () => {
-                        const hasImage = /\b(gera|gere|gerar|cria|crie|criar|faz|faca|fazer|desenha|desenhe|desenhar)\b.{0,30}\b(imagem|foto|arte|ilustra|ilustracao|desenho|wallpaper|pfp|avatar|banner)\b|\b(desenha|desenhe|desenhar)\s+(voce|vc|a\s+hikari|sua\s+propria)\b/i.test(normSearchPrompt);
-                        const isSelf = isHikariSelfPortraitIntent(options.searchPrompt || prompt);
-                        return hasImage && !isSelf;
-                    },
-                    args: () => {
-                        const src = options.searchPrompt || prompt;
-                        const m = src.match(/(?:imagem|foto|arte|ilustra|desenho|wallpaper|pfp|avatar|banner)[:\sde]+(.+)/i);
-                        return { prompt: (m ? m[1] : src).trim().substring(0, 200), negative_prompt: 'nsfw, nude, explicit, gore, violence, blood, adult content, 18+, pornographic' };
-                    }
-                },
-                {
-                    tool: 'db_read',
-                    test: () => {
-                        const cleanPrompt = normSearchPrompt.replace(/[?!.,;:_]/g, '').trim();
-                        if (cleanPrompt === 'quem e o seu criador e me fale sobre ele' ||
-                            cleanPrompt === 'quem e seu criador e me fale sobre ele' ||
-                            cleanPrompt === 'quem e seu criador e fale sobre ele' ||
-                            cleanPrompt === 'quem e o seu criador' ||
-                            cleanPrompt === 'quem e seu criador') {
-                            return true;
-                        }
-                        return /\b(quem\s+(?:e|foi)\s+(?:o\s+)?(?:seu\s+)?criador|me\s+fale\s+sobre\s+(?:o\s+)?(?:seu\s+)?criador|quem\s+te\s+(?:criou|programou|fez)|fale\s+sobre\s+(?:o\s+)?(?:seu\s+)?criador|sobre\s+o\s+(?:seu\s+)?criador|sobre\s+seu\s+criador)\b/i.test(normSearchPrompt);
-                    },
-                    args: () => ({ key: 'creator_info' })
-                },
-                {
-                    tool: 'db_read',
-                    test: () => {
-                        const hasImage = /\b(gera|gere|gerar|cria|crie|criar|faz|faca|fazer|desenha|desenhe|desenhar)\b.{0,30}\b(imagem|foto|arte|ilustra|ilustracao|desenho|wallpaper|pfp|avatar|banner)\b|\b(desenha|desenhe|desenhar)\s+(voce|vc|a\s+hikari|sua\s+propria)\b/i.test(normSearchPrompt);
-                        const isSelf = isHikariSelfPortraitIntent(options.searchPrompt || prompt);
-                        if (hasImage && isSelf) return true;
-                        return /\b(qual\s+(?:e\s+)?(?:a\s+)?sua\s+aparencia|como\s+voce\s+e\s+fisicamente|como\s+voce\s+e\b|como\s+e\s+voce|como\s+e\s+sua\s+aparencia|descreva\s+(?:a\s+)?sua\s+aparencia|como\s+e\s+seu\s+(?:rosto|cabelo|corpo|olho|olhos)|sua\s+aparencia\s+fisica|me\s+fale\s+sobre\s+voce|fale\s+sobre\s+voce|quem\s+e\s+a\s+hikari|quem\s+e\s+voce|me\s+fale\s+sobre\s+a\s+hikari|fale\s+sobre\s+a\s+hikari)\b/i.test(normSearchPrompt);
-                    },
-                    args: () => ({ key: 'hikari_info' })
-                },
-                {
-                    tool: 'db_write',
-                    test: () => parseMemoryIntent(options.memoryRequest)?.operation === 'write',
-                    args: () => {
-                        const content = parseMemoryIntent(options.memoryRequest).content;
-                        const key = content.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
-                            .split(/\s+/).slice(0, 3).join('_').replace(/[^a-z0-9_]/g, '').slice(0, 120);
-                        return { key: key || 'anotacao', content };
-                    }
-                },
-                {
-                    tool: 'show_bot_menu',
-                    test: () => {
-                        return /\b(qual|quais)\s+(?:sao|e)\s+suas\s+(?:funcoes|capacidades|recursos|habilidades)\b|\b(?:o\s+que|oque)\s+(?:voce|vc)\s+(?:sabe|pode|consegue)\s+fazer\b|\b(?:mostr(?:a|e|ar)?|abr(?:a|e|ir)?|ver)\s+(?:o\s+)?menu\s+(?:de\s+ajuda|de\s+comandos|interativo)\b|\bmenu\s+de\s+ajuda\b/i.test(normSearchPrompt);
-                    },
-                    args: () => ({ context: 'geral' })
-                },
-            ];
-            const PROMISE_PATTERNS = /\b(vou\s+(?:baixar|procurar|buscar|pesquisar|verificar|tentar|anotar|salvar|guardar|lembrar|registrar|abrir|mostrar|passar)|irei\s+(?:baixar|procurar|buscar|pesquisar|anotar|salvar|abrir)|aguarde enquanto|deixa eu\s+(?:baixar|procurar|anotar|abrir)|(?:ok|blz|t[aá]|pode deixar),?\s+vou\s+(?:baixar|procurar|buscar|anotar|salvar|guardar)|(?:t[oô]|estou)\s+(?:baixando|buscando|pesquisando|anotando|salvando)|(?:vou|j[aá])\s+te\s+(?:mandar|mostrar|abrir)|posso\s+te\s+(?:mostrar|abrir)\s+o\s+menu)\b/i;
-            const explicitMcp = !options.disableTools && explicit;
-            if (explicitMcp) {
-                if (interaction && typeof interaction.react === 'function') {
-                    interaction.react('✅').catch(() => {});
-                }
-                if (!isToolDisabled(options?.guildId || guildId, explicitMcp.tool)) {
-                    console.log(`[MCP UNIVERSAL] Comando MCP explícito detectado: ${explicitMcp.tool}`, explicitMcp.args);
-                    rawResponse = JSON.stringify({ thought: 'comando-universal-mcp', tool: explicitMcp.tool, args: explicitMcp.args });
-                    processedResponse = rawResponse;
-                }
-            } else if (!rawHasJson) {
-                const matchedAction = ACTION_TOOLS.find(t => t.test());
-                if (matchedAction && !isToolDisabled(options?.guildId || guildId, matchedAction.tool)) {
-                    if (matchedAction.tool === 'db_read') {
-                        const { canRead } = require('./databaseHandler');
-                        if (canRead(options?.guildId || guildId)) {
-                            console.log(`[DB_INTENT] Consulta interceptada para db_read (${matchedAction.args().key}).`);
-                            rawResponse = JSON.stringify({ thought: 'consultar dados no banco', tool: 'db_read', args: matchedAction.args() });
-                            processedResponse = rawResponse;
-                        }
-                    } else if (matchedAction.tool === 'db_write') {
-                        const { canWrite } = require('./databaseHandler');
-                        if (canWrite(options?.guildId || guildId)) {
-                            console.log(`[DB_INTENT] Gravação interceptada para db_write (${matchedAction.args().key}).`);
-                            rawResponse = JSON.stringify({ thought: 'gravar dados no banco', tool: 'db_write', args: matchedAction.args() });
-                            processedResponse = rawResponse;
-                        }
-                    } else {
-                        console.log(`[ACTION_INTENT] Ação direta interceptada para ${matchedAction.tool}`);
-                        rawResponse = JSON.stringify({ thought: 'acao-direta', tool: matchedAction.tool, args: matchedAction.args() });
-                        processedResponse = rawResponse;
-                    }
-                } else if (PROMISE_PATTERNS.test(lowerRaw)) {
-                    const matched = ACTION_TOOLS.find(t => t.test());
-                    if (matched && !isToolDisabled(options?.guildId || guildId, matched.tool)) {
-                        console.log(`[FALLBACK DET.] Falso atendimento interceptado. Chamando: ${matched.tool}`);
-                        rawResponse = JSON.stringify({ thought: 'auto-fallback', tool: matched.tool, args: matched.args() });
-                        processedResponse = rawResponse;
-                    }
-                }
+            if (dispatchExplicitly && isActionPromise(readPlan(rawResponse).text)) {
+                const retry = await generateResponse(`${routingPrompt}\n\nExecute agora a ferramenta necessária para atender ao pedido original. Retorne apenas uma chamada de ferramenta válida, com argumentos. Se faltar um dado, não invente.`, channelId, {
+                    ...options, userId, guildId: options.guildId || guildId, allowSearch: false
+                });
+                const plan = readPlan(retry);
+                const eligible = (plan.tools || []).filter(item => item?.tool &&
+                    ALL_MCP_TOOLS.some(entry => entry.function.name === item.tool) &&
+                    !isToolDisabled(options.guildId || guildId, item.tool));
+                rawResponse = eligible.length === 1 ? JSON.stringify(eligible[0])
+                    : eligible.length > 1 ? JSON.stringify({ multi_tools: eligible })
+                    : 'Não consegui acionar a ferramenta para esse pedido.';
+                processedResponse = rawResponse;
             }
             const CASUAL_ONLY = /^(oi|olá|ola|hey|hi|bom dia|boa tarde|boa noite|tudo bem|tudo bom|e aí|e ai|como vai|como você tá|como vc tá|tá bem|ta bem|blz|beleza|legal|massa|top|show|kk|haha|rs|lol|obrigad|vlw|valeu|tmj|flw|falou)[\s!?.]*$/i;
             const rawPromptText = (options.searchPrompt || prompt).trim();
@@ -2728,7 +2521,8 @@ Como o projeto é open-source, você pode hospedar sua própria versão e ter co
                             radioUserId,
                             radioGuildId,
                             radioTextChannel,
-                            interaction.hybridClient || interaction.radioClient || null
+                            interaction.hybridClient || interaction.radioClient || null,
+                            interaction.radioSessionId
                         );
                         if (radioResult) await unifiedReply(radioResult);
                         reportConversation(prompt, userTag, userId, `[TOOL: RADIO_MCP]`, interaction);
@@ -3556,53 +3350,15 @@ Responda APENAS com texto (NÃO USE JSON/TOOLS AGORA). Seja direto e informativo
         }
         if (processedResponse) {
             processedResponse = stripThinking(processedResponse);
+            if (!options.disableTools && !options.radioMode && !options.hybridMode && isActionPromise(processedResponse)) {
+                processedResponse = 'Não consegui executar essa ação nesta resposta.';
+            }
         }
         if (processedResponse && (processedResponse.includes('[Tool Use:') || thoughtLeakRegex.test(processedResponse))) {
             console.error('[SECURITY BLOCK] Bloqueado vazamento de Tool Use/JSON Raw:', processedResponse);
             processedResponse = "⚠️ **Erro de Processamento:** A IA tentou usar uma ferramenta mas o formato do MCP saiu inválido, isso é normal, não é um bug. Tente novamente ou use os comandos /buscar_jogo, /baixar_musica ou /baixar_video";
         }
-        if (options && options.radioMode && !options.hybridMode) {
-            const cleanPrompt = (prompt || '').toLowerCase().trim();
-            let fallbackTool = null;
-            let fallbackArgs = {};
-
-            if (/^(para|pare|parar|pause|pausa|desliga|stop|silencio|silêncio|cancela|desativa)$/i.test(cleanPrompt) || cleanPrompt.includes('para') || cleanPrompt.includes('pare') || cleanPrompt.includes('desliga')) {
-                fallbackTool = 'radio_pause_resume';
-            } else if (/^(pula|passa|proxima|próxima|next|skip)$/i.test(cleanPrompt) || cleanPrompt.includes('pula') || cleanPrompt.includes('passa')) {
-                fallbackTool = 'radio_next_track';
-            } else if (/^(volta|anterior|back)$/i.test(cleanPrompt) || cleanPrompt.includes('volta') || cleanPrompt.includes('anterior')) {
-                fallbackTool = 'radio_prev_track';
-            } else if (/^(sai da call|desconecta da call|encerra o rádio|tchau hikari)$/i.test(cleanPrompt) || cleanPrompt.includes('sai da call') || cleanPrompt.includes('desconecta da call')) {
-                fallbackTool = 'radio_leave_call';
-            } else if (/^(fila|lista|playlist)$/i.test(cleanPrompt)) {
-                fallbackTool = 'radio_show_queue';
-            } else if (/^(toca|coloca|play|bota)/i.test(cleanPrompt)) {
-                const match = cleanPrompt.match(/^(toca|coloca|play|bota)\s*(.*)$/i);
-                const q = (match && match[2]?.trim()) ? match[2].trim() : 'músicas populares';
-                fallbackTool = 'radio_play_music';
-                fallbackArgs = { query: q };
-            }
-
-            if (fallbackTool) {
-                const { handleRadioMCPCall } = require('../music/radioMCPHandler');
-                const radioGuildId = options.guildId || interaction.guildId;
-                const radioTextChannel = interaction.radioTextChannel || interaction.channel;
-                const radioUserId = interaction.radioUserId || userId;
-                const radioResult = await handleRadioMCPCall(
-                    fallbackTool,
-                    fallbackArgs,
-                    radioUserId,
-                    radioGuildId,
-                    radioTextChannel,
-                    interaction.radioClient || null
-                );
-                if (radioResult) await unifiedReply(radioResult);
-                reportConversation(prompt, userTag, userId, `[TOOL: DETERMINISTIC_${fallbackTool.toUpperCase()}]`, interaction);
-                return;
-            } else {
-                return;
-            }
-        }
+        if (options.radioMode && !options.hybridMode) return;
 
         const cleanPromptLower = (prompt || '').toLowerCase().trim();
         const hasUrl = /https?:\/\//i.test(cleanPromptLower);

@@ -1,76 +1,38 @@
+const commands = [
+    ['PAUSE', /(?:pausa[rs]?|pause|espera|sil[eê]ncio|para um pouco|d[aá] um tempo|hold|cala (?:a )?boca)/i],
+    ['STOP', /(?:para|pare|parar|stop|cancela|para tudo|fechar|encerrar|(?:para|pare|parar|desliga) (?:(?:a |o )?(?:m[uú]sica|r[aá]dio|som)|de tocar))/i],
+    ['RESUME', /(?:toca[rs]?|play|retom[ae]r?|volt[ae]r? a tocar|despaus[ae]r?|solta (?:o som|a m[uú]sica)|continua|resume)/i],
+    ['LEAVE', /(?:sai[ar]?|vaza[r]?|desconecta[r]?)(?: (?:da call|da cal|do canal|daqui))?|tchau|at[eé] logo/i],
+    ['NEXT', /(?:pr[oó]xima(?: (?:m[uú]sica|faixa))?|passa|pula|skip|pular|avan[çc]a[r]?|troca|muda[r]? m[uú]sica)(?: (?:essa|esta|a m[uú]sica|a faixa))?/i],
+    ['PREVIOUS', /(?:anterior|volta[r]?|volte|back|a de antes|(?:toca[r]? |volta[r]? )?(?:a |para a )?(?:m[uú]sica |faixa )?anterior|toca a de antes)/i],
+    ['SHUFFLE', /(?:embaralha[r]?|shuffle|mistura[r]?|(?:ativa[r]? )?(?:(?:o )?modo )?aleat[oó]rio|ordem aleat[oó]ria|ativar shuffle)/i],
+    ['LOOP', /(?:repete|repita|repetir)(?: (?:a )?(?:m[uú]sica|faixa))?|loop|modo de repeti[çc][aã]o/i],
+    ['INFO', /(?:que m[uú]sica [eé] essa|qual (?:[eé] )?o nome (?:dessa|da) m[uú]sica|qual m[uú]sica t[aá] tocando|quem t[aá] cantando|nome da m[uú]sica)/i],
+    ['QUEUE', /(?:(?:mostra|ver) (?:a )?(?:fila|lista)|lista de m[uú]sicas|quais m[uú]sicas tem|fila|queue)/i]
+].map(([type, pattern]) => [type, new RegExp('^(?:' + pattern.source + ')$', pattern.flags)]);
+
+const addPattern = /^(?:toca[r]?|toque|bota[r]?|bote|coloca[r]?|coloque|p[oõ]e|adicion[ae]r?|pesquisa[r]?|reproduzi[r]?|solta[r]?)\s+(?:(?:a m[uú]sica|a faixa|o som de)\s+)?(.+)$/i;
+const removePattern = /^(?:remov[ae]r?|tir[ae]r?|apaga[r]?|deleta[r]?)\s+(?:(?:a )?(?:m[uú]sica|faixa|n[uú]mero)\s+)?#?(\d+)$/i;
+
 function parseRadioIntent(text) {
-    if (!text || typeof text !== 'string') return null;
+    if (typeof text !== 'string') return null;
+    const request = text.trim()
+        .replace(/^(?:hikari|hicari|ikari)[,\s]+/i, '')
+        .replace(/^(?:(?:por favor|agora)[,\s]+)+/i, '')
+        .replace(/(?:[,\s]+(?:por favor|a[íi]))?[.!?]+$/i, '')
+        .replace(/[,\s]+(?:por favor|a[íi])$/i, '')
+        .trim();
+    if (!request) return null;
 
-    let cleanText = text.toLowerCase().trim();
-    cleanText = cleanText.replace(/^(?:hikari|hicari|ikari)\s+/i, '').trim();
+    const command = commands.find(([, pattern]) => pattern.test(request));
+    if (command) return { type: command[0] };
 
-    if (/^(?:voc[eê]|vc|tu\s+)?(?:sabe\s+tocar|conhece|gosta\s+de\s+tocar|pode\s+tocar)\b/i.test(cleanText) || /^(?:voc[eê]|vc|tu)\s+toca\b/i.test(cleanText)) {
-        return null;
-    }
+    const remove = request.match(removePattern);
+    if (remove) return { type: 'REMOVE', position: Number(remove[1]) };
 
-    const addPrefixRegex = /(?:^|\b)(?:toca|tocar|bota|botar|bote|coloca|colocar|coloque|põe|poe|adicione|adicionar|pesquisa|pesquisar|reproduzir|solta|soltar)\s+(?:a\s+música\s+|a\s+musica\s+|o\s+som\s+de\s+|a\s+faixa\s+)?(.+)$/i;
-    const addMatch = cleanText.match(addPrefixRegex);
-    if (addMatch && addMatch[1]) {
-        let query = addMatch[1].trim();
-        query = query.replace(/\s+(?:então|cara|por favor|aí|ai|mano|bro|velho|tipo|assim).*$/i, '').trim();
-        query = query.replace(/[.,!?:;]+$/, '').trim();
-        if (query.length >= 2 && !/^(?:o\s+som|a\s+m[uú]sica|som|m[uú]sica|a\s+anterior|anterior|a\s+de\s+antes|de\s+antes|a\s+pr[oó]xima|pr[oó]xima|proxima)$/i.test(query)) {
-            return { type: 'ADD', query };
-        }
-    }
-
-    if (/^(?:para|pare|parar|stop)$/i.test(cleanText)) {
-        return { type: 'STOP' };
-    }
-
-    if (/\b(pausa|pausar|pause|espera|silêncio|silencio|para um pouco|dá um tempo|da um tempo|hold|cala a boca|cala boca)\b/i.test(cleanText)) {
-        return { type: 'PAUSE' };
-    }
-
-    if (/\b(parar|pare|parar rádio|parar radio|pare o rádio|pare o radio|pare a música|pare a musica|para a música|para a musica|para o rádio|para o radio|para o som|para tudo|desliga a música|desliga a musica|stop|cancela|desliga o rádio|desliga o radio|fechar|encerrar)\b/i.test(cleanText)) {
-        return { type: 'STOP' };
-    }
-
-    if (/\b(sair|saia|sai|sair da call|saia da call|sai da call|sair do canal|saia do canal|sai do canal|vaza|vazar|desconectar|desconecta|tchau|até logo|ate logo|sair da cal|saia da cal|sai da cal|sai daqui)\b/i.test(cleanText)) {
-        return { type: 'LEAVE' };
-    }
-
-    if (/\b(próxima|proxima|passa|pula|skip|avançar|avancar|próxima música|proxima musica|passa essa|troca|muda música|muda musica|mudar música|mudar musica|passar)\b/i.test(cleanText)) {
-        return { type: 'NEXT' };
-    }
-
-    if (/\b(anterior|voltar|volta|volte|música anterior|musica anterior|voltar música|voltar musica|toca a anterior|toca anterior|tocar anterior|toca a de antes|a de antes|back)\b/i.test(cleanText)) {
-        return { type: 'PREVIOUS' };
-    }
-
-    if (/\b(embaralhar|modo aleatório|modo aleatorio|shuffle|misturar|ordem aleatória|ordem aleatoria|ativar aleatorio|ativar modo aleatorio|ativar shuffle)\b/i.test(cleanText)) {
-        return { type: 'SHUFFLE' };
-    }
-
-    if (/\b(repetir|loop|modo de repetição|modo de repeticao|repetir música|repetir musica)\b/i.test(cleanText)) {
-        return { type: 'LOOP' };
-    }
-
-    if (/\b(que música é essa|que musica e essa|qual o nome dessa música|qual o nome dessa musica|quem tá cantando|quem ta cantando|nome da música|nome da musica)\b/i.test(cleanText)) {
-        return { type: 'INFO' };
-    }
-
-    if (/\b(mostra a fila|ver fila|lista de músicas|lista de musicas|quais músicas tem|quais musicas tem|ver a lista|mostra a lista|queue)\b/i.test(cleanText)) {
-        return { type: 'QUEUE' };
-    }
-
-    const removeMatch = cleanText.match(/\b(?:remover|tira|tirar|apagar|deletar)\s+(?:a\s+música\s+|a\s+faixa\s+|música\s+|faixa\s+|número\s+|numero\s+)?(\d+)\b/i);
-    if (removeMatch) {
-        return { type: 'REMOVE', position: parseInt(removeMatch[1], 10) };
-    }
-
-    if (/\b(tocar|play|retomar|voltar a tocar|despausar|solta o som|continua|solta a música|solta a musica|resume)\b/i.test(cleanText)) {
-        return { type: 'RESUME' };
-    }
-
+    const add = request.match(addPattern);
+    if (add && add[1].trim().length >= 2) return { type: 'ADD', query: add[1].trim() };
     return null;
 }
 
-module.exports = {
-    parseRadioIntent
-};
+module.exports = { parseRadioIntent };

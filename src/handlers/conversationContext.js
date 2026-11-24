@@ -19,6 +19,19 @@ function searchRequest(text, context = {}) {
     return { query: subject && !noTopic.test(subject) && !related ? subject : null };
 }
 
+const promiseAction = /\b(?:(?:vou|irei|deixa eu)\s+(?:checar|consultar|pesquisar|procurar|buscar|verificar|converter|calcular|baixar|gerar|criar|anotar|salvar|guardar|registrar|abrir|mandar|enviar)|(?:j[aá]|agora)\s+(?:checo|consulto|pesquiso|procuro|busco|verifico|converto|calculo|baixo|gero|crio|anoto|salvo|guardo|registro|abro|mando|envio)|(?:estou|t[oô])\s+(?:pesquisando|buscando|consultando|convertendo|baixando|gerando)|aguarde enquanto)\b/iu;
+
+function isActionPromise(value) {
+    if (typeof value !== 'string') return false;
+    const text = value.replace(/^\s*-# .*$/gm, '').trim();
+    const match = promiseAction.exec(text);
+    if (!match || match.index > 130) return false;
+    const prefix = text.slice(0, match.index);
+    if (/\b(?:encontrei|achei|consultei|converti|resultado|pre[çc]o|cust[ao])\b|https?:\/\/|(?:R\$|€|US\$)\s*\d/iu.test(prefix)) return false;
+    if (/(?:\bn[aã]o|\bnunca)\s*$/iu.test(prefix)) return false;
+    return !/(?:https?:\/\/|(?:R\$|€|US\$)\s*\d|\b(?:encontrei|achei|consultei|converti)\b)/iu.test(text.slice(match.index + match[0].length));
+}
+
 function profileRequest(value) {
     const text = cleanTopic(value).normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
     if (/^(?:doq|do que|de que|o que)\s+eu gosto\b|\b(?:meus?|minhas?)\s+(?:gostos?|preferencias?|[^.!?]{0,26}favorit[oa]s?)\b|\bo que (?:voce )?sabe sobre mim\b/u.test(text)) return 'personal';
@@ -39,6 +52,7 @@ function usableToolReply(value) {
         } catch { return ''; }
     }
     if (!cleaned || /⚠️ SYSTEM ERROR|limites de processamento atingidos|default_api\.|tool_code|^\s*\{|^\s*```/iu.test(cleaned)) return '';
+    if (isActionPromise(cleaned)) return '';
     if (/^\s*(?:(?:blz|ok|certo|beleza)[,.!\s]*)?(?:(?:t[oô]|estou)\s+pesquisando|vou\s+(?:pesquisar|buscar|verificar))\b[^.!?]*[.!?]*$/iu.test(cleaned)) return '';
     return (cleaned.match(/[\p{L}\p{N}]+/gu) || []).length >= 2 ? cleaned : '';
 }
@@ -50,4 +64,4 @@ function limitMentions(content, allowedIds) {
         .replace(/<@&(\d+)>/g, '@cargo');
 }
 
-module.exports = { searchRequest, usableToolReply, limitMentions, profileRequest };
+module.exports = { searchRequest, usableToolReply, limitMentions, profileRequest, isActionPromise };

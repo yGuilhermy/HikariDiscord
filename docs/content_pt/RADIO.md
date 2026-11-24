@@ -20,9 +20,9 @@ O **Modo Rádio** da Hikari é um ecossistema completo de reprodução musical e
 O Modo Rádio elimina a necessidade de realizar o download completo de arquivos do YouTube antes de iniciar a reprodução.
 
 - **Streaming em Tempo Real (`youtubeBufferStream.js`)**: Redireciona a saída do `yt-dlp` diretamente para o `ffmpeg`, produzindo um fluxo contínuo de áudio em PCM s16le (48.000 Hz, estéreo 16-bit).
-- **Buffer inicial.** O player acumula 1 segundo de PCM (192.000 bytes) antes de iniciar. O tempo total também depende da resolução da faixa e da rede.
-- **Controle de fluxo.** A leitura pausa ao atingir 8 segundos de áudio em memória e retoma quando o buffer cai para 4 segundos.
-- **Tratamento de Underflow**: Em flutuações de rede, envia pequenos frames de silêncio (20ms) mantendo a sincronia de tempo do `@discordjs/voice` sem derrubar o player.
+- **Buffer inicial.** O player acumula 4 segundos de PCM (768.000 bytes), ou o áudio inteiro se for mais curto, antes de tocar. O tempo total também depende da resolução da faixa e da rede.
+- **Controle de fluxo.** O buffer comporta cerca de 8 segundos de áudio. O recebimento desacelera quando atinge esse limite.
+- **Quando o stream falha:** se o áudio do YouTube ainda não começou, o rádio tenta o carregamento em arquivo. Após uma falha de reprodução, o rádio pode avançar para a próxima faixa.
 
 ---
 
@@ -54,9 +54,9 @@ A resolução de mídia (`radioProviders.js`) suporta múltiplos formatos com ex
 - **Algoritmo do Modo Direct (Keyword & Intent Engine)**:
   - **Execução Instantânea**: Responde em menos de 50ms após o STT.
   - **Captura em Frases Curtas e Longas**: Identifica intenções no meio da sentença (ex: *"Hikari, pare a música então cara"*).
-  - **Intenções Suportadas**: `Pausar`, `Retomar`, `Parar`, `Próxima`, `Anterior`, `Embaralhar`, `Repetir`, `Ver Fila`, `Info da Música`, `Remover Faixa` e `Busca/Adição de Músicas` (ex: *"Hikari, tocar Welcome to the Jungle"* ou *"Hikari, Welcome to the Jungle"*).
+  - **Intenções Suportadas**: `Pausar`, `Retomar`, `Parar`, `Próxima`, `Anterior`, `Embaralhar`, `Repetir`, `Ver Fila`, `Info da Música`, `Remover Faixa` e `Busca/Adição de Músicas` (ex: *"Hikari, tocar Welcome to the Jungle"*).
   - **Notificação Temporária**: Envia no chat uma notificação mencionando o usuário (`<@userId> ⚡ **[Direct]** ...`) com exclusão automática em 4 segundos.
-- **Autoproteção de Rate Limit (429/492)**: Ao atingir o limite da API do Whisper, a escuta de voz é desativada temporariamente por **1 minuto**, com notificação automática no chat e reativação agendada.
+- **Autoproteção de Rate Limit (429/492)**: Ao atingir o limite da API do Whisper, a escuta de voz é desativada temporariamente por **1 minuto**, com indicação no painel e retomada no modo selecionado.
 - **Monitoramento de Canal Vazio**: Encerra a sessão e desloga a chamada se não houver usuários humanos no canal por mais de 10 segundos.
 
 ---
@@ -67,12 +67,12 @@ O painel visual do Rádio (`radioEmbed.js`) fornece controles interativos em tem
 
 - **Controles Disponíveis**:
   - `➕ Adicionar`: Modal interativo para colar links ou pesquisar músicas.
-  - `🗑️ Remover`: Modal interativo para remover uma música da lista especificando o número da posição (`#x`).
+  - `🗑️ Remover`: Abre um seletor paginado de faixas.
   - `⏯️ Play/Pause`: Alterna pausa e reprodução.
-  - `⏹️ Parar`: Interrompe completamente a reprodução, avança o índice para o final e coloca o rádio em "tocando nada".
+  - `⏹️ Parar`: Interrompe a reprodução e mantém as faixas na fila. Use Play para reiniciar.
   - `⏭️ Próxima` / `⏮️ Anterior`: Navega entre faixas da fila/histórico.
   - `🔀 Embaralhar`: Ativa/desativa ordem aleatória.
-  - `🔁 Loop`: Alterna modos (Off ➔ Playlist ➔ Música).
+  - `🔁 Loop`: Alterna modos (Off ➔ Faixa ➔ Playlist).
   - `⚡ Voz: Direct` / `🧠 Voz: IA` / `🔇 Voz: Off`: Alterna ciclicamente entre os três modos de escuta por voz (`OFF` ➔ `IA` ➔ `DIRECT` ➔ `OFF`). *(Desativada por padrão no servidor para economia de recursos. Caso desativada, exibe aviso para que um Administrador ative a ferramenta `radio_voice_stt` via `/ia_ferramentas`).*
   - `📋 Fila`: Exibe menu efêmero com as próximas músicas.
   - `👋 Sair`: Encerra o modo rádio e desconecta o bot.
@@ -83,7 +83,7 @@ O painel visual do Rádio (`radioEmbed.js`) fornece controles interativos em tem
 ## 🧹 5. Limpeza Inteligente e Gerenciamento Temporário
 
 - **Serviço de Limpeza (`radioCleaner.js`)**: Monitora o diretório `src/music/data/temp_radio_audio`.
-- **Preservação de Mídia em Execução**: Verifica todas as sessões ativas (`getAllSessions()`) e não deleta arquivos que estejam tocando no momento.
+- **Preservação de Mídia em Execução**: Verifica todas as sessões ativas (`getAllSessions()`) e preserva os arquivos das faixas que ainda pertencem às filas.
 - **Expurgo Automático**: Apaga arquivos inativos com mais de 15 minutos de idade. Roda na inicialização e periodicamente a cada 10 minutos.
 - **Configuração no `.gitignore`**:
   ```gitignore
@@ -95,7 +95,7 @@ O painel visual do Rádio (`radioEmbed.js`) fornece controles interativos em tem
 
 ## 💡 Dicas e Resolução de Problemas
 
-- 💡 **Transição Suave**: O sistema utiliza travas internas (`transitioningGuilds`) para prevenir loops de transição e suprimir erros do tipo `Premature close`.
+- 💡 **Transição Suave**: Mudar de faixa, parar ou sair cancela os carregamentos anteriores. Uma conclusão atrasada não volta a iniciar o áudio.
 - 💡 **Exclusão de Mensagens**: Todas as remoções de mensagens temporárias possuem tratamento `.catch(() => {})` contra exceções `Unknown Message`.
 
 ---
@@ -109,4 +109,4 @@ O painel visual do Rádio (`radioEmbed.js`) fornece controles interativos em tem
 
 ### Modos de busca do painel
 
-**Híbrido**, indicado como padrão no botão de busca, mantém links do YouTube como faixas do YouTube. **Rápido** tenta encontrar no Deezer uma faixa equivalente para cada item de um link do YouTube. Esse botão muda a busca de fontes. Para combinar conversa e reprodução na chamada, use o modo de chamada Híbrido.
+**Híbrido**, indicado como padrão no botão de busca, mantém links do YouTube como faixas do YouTube. **Rápido** procura faixas equivalentes no Deezer conforme cada item do YouTube se aproxima da reprodução. Esse botão muda a busca de fontes. Para combinar conversa e reprodução na chamada, use o modo de chamada Híbrido.

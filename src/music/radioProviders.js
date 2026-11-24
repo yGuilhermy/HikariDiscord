@@ -3,9 +3,10 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { searchDeezerTracks, calculateConfidenceScore } = require('../services/deezerMusicService');
-const { downloadAudio } = require('../handlers/youtubeAudioHandler');
+const { randomUUID } = require('node:crypto');
+const config = require('../config');
 
-const { TEMP_RADIO_DIR, cleanTempRadioAudio } = require('./radioCleaner');
+const { TEMP_RADIO_DIR } = require('./radioCleaner');
 
 function extractUrl(str) {
     if (!str) return '';
@@ -23,73 +24,42 @@ function isValidHttpUrl(string) {
     }
 }
 
-function isYouTubeUrl(str) {
-    return /(?:youtube\.com|youtu\.be|music\.youtube\.com)/i.test(str);
+function onDomain(host, domain) {
+    return host === domain || host.endsWith('.' + domain);
 }
 
-function isDeezerUrl(str) {
-    return /deezer\.com/i.test(str);
+function isYouTubeUrl(url) {
+    const id = /^[a-zA-Z0-9_-]{11}$/;
+    if (url.hostname === 'youtu.be') return id.test(url.pathname.split('/')[1] || '');
+    if (!onDomain(url.hostname, 'youtube.com')) return false;
+    if (url.pathname === '/playlist') return /^[\w-]+$/.test(url.searchParams.get('list') || '');
+    if (url.pathname === '/watch') return id.test(url.searchParams.get('v') || '');
+    const [, kind, segment] = url.pathname.split('/');
+    return ['shorts', 'embed', 'live'].includes(kind) && id.test(segment || '');
 }
 
-function isDeezerPlaylist(str) {
-    return /deezer\.com\/.*playlist/i.test(str);
+function deezerRoute(url) {
+    if (!onDomain(url.hostname, 'deezer.com')) return null;
+    return url.pathname.match(/^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?(track|album|playlist)\/(\d+)\/?$/i);
 }
 
-function isDeezerAlbum(str) {
-    return /deezer\.com\/.*album/i.test(str);
-}
-
-function isSpotifyUrl(str) {
-    return /(?:spotify\.com|spoti\.fi)/i.test(str);
-}
-
-function isYouTubePlaylist(str) {
-    return /(?:youtube\.com|youtu\.be|music\.youtube\.com)\/.*[?&]list=/i.test(str) || /\/playlist\?list=/i.test(str);
-}
-
-async function resolveDeezerTrack(url) {
-    try {
-        const clean = extractUrl(url);
-        const match = clean.match(/deezer\.com\/.+?\/track\/(\d+)/);
-        if (!match) return null;
-        const res = await axios.get(`https://api.deezer.com/track/${match[1]}`);
-        const t = res.data;
-        if (!t || !t.id) return null;
-        return {
-            id: String(t.id),
-            title: t.title,
-            artist: t.artist?.name || 'Desconhecido',
-            album: t.album?.title || '',
-            duration: t.duration,
-            cover: t.album?.cover_medium || '',
-            link: t.link,
-            source: 'deezer'
-        };
-    } catch (_) {
-        return null;
-    }
-}
-
-async function resolveDeezerPlaylist(url) {
-    try {
-        const clean = extractUrl(url);
-        const match = clean.match(/deezer\.com\/.+?\/playlist\/(\d+)/);
-        if (!match) return [];
-        const res = await axios.get(`https://api.deezer.com/playlist/${match[1]}`);
-        const tracks = (res.data?.tracks?.data || []).slice(0, 100);
-        return tracks.map(t => ({
-            id: String(t.id),
-            title: t.title,
-            artist: t.artist?.name || 'Desconhecido',
-            album: t.album?.title || '',
-            duration: t.duration,
-            cover: t.album?.cover_medium || '',
-            link: t.link,
-            source: 'deezer'
-        }));
-    } catch (_) {
-        return [];
-    }
+async function resolveDeezer(route) {
+    const [, type, id] = route;
+    const { data } = await axios.get('https://api.deezer.com/' + type + '/' + id, { timeout: 5000 });
+    if (!data || data.error) return null;
+    const mapTrack = track => ({
+        id: String(track.id),
+        title: track.title,
+        artist: track.artist?.name || data.artist?.name || 'Desconhecido',
+        album: track.album?.title || (type === 'album' ? data.title : ''),
+        duration: track.duration,
+        cover: track.album?.cover_medium || (type === 'album' ? data.cover_medium : ''),
+        link: track.link,
+        source: 'deezer'
+    });
+    if (type === 'track') return data.id ? { type: 'track', track: mapTrack(data) } : null;
+    const tracks = (data.tracks?.data || []).filter(track => track.id).slice(0, 100).map(mapTrack);
+    return tracks.length ? { type: 'playlist', tracks } : null;
 }
 
 async function resolveYouTubeTrack(url) {
@@ -110,87 +80,47 @@ async function resolveYouTubeTrack(url) {
         } catch (_) {}
     }
 
-    return new Promise((resolve) => {
-        const config = require('../config');
-        const cookiesPath = config.ytdlpCookiesPath;
-        const args = ['--no-warnings', '--no-update'];
-        if (cookiesPath && fs.existsSync(cookiesPath)) {
-            args.push('--cookies', cookiesPath);
-        }
-        args.push('-j', '--', cleanUrl);
+    if (oembedData) {
+        return { id: videoId, title: oembedData.title, artist: oembedData.author_name || 'YouTube',
+            cover: oembedData.thumbnail_url, link: cleanUrl, source: 'youtube' };
+    }
 
-        const proc = spawn('yt-dlp', args);
-        let stdout = '';
+    return new Promise((resolve, reject) => {
+        const cookies = config.ytdlpCookiesPath;
+        const args = [
+            ...(cookies && fs.existsSync(cookies) ? ['--cookies', cookies] : []),
+            ...(config.ytdlpExtraFlags || []), '--no-warnings', '--no-update',
+            '--no-playlist', '-j', '--', cleanUrl
+        ];
+        const proc = spawn('yt-dlp', args, { stdio: ['ignore', 'pipe', 'ignore'] });
+        let output = '';
+        let timedOut = false;
         const timer = setTimeout(() => {
-            proc.kill();
+            timedOut = true;
+            proc.kill('SIGKILL');
         }, 15000);
 
-        proc.stdout.on('data', (d) => { stdout += d.toString(); });
-        proc.on('close', () => {
+        proc.stdout.on('data', chunk => { output += chunk; });
+        proc.once('close', code => {
             clearTimeout(timer);
-            let m = {};
-            if (stdout) {
-                try {
-                    const firstBrace = stdout.indexOf('{');
-                    const lastBrace = stdout.lastIndexOf('}');
-                    if (firstBrace !== -1 && lastBrace > firstBrace) {
-                        m = JSON.parse(stdout.substring(firstBrace, lastBrace + 1));
-                    }
-                } catch (_) {}
+            if (timedOut) return reject(new DOMException('Metadados do YouTube excederam o prazo.', 'TimeoutError'));
+            if (code !== 0 || !output.trim()) return reject(new Error('Metadados do YouTube indisponíveis.'));
+            try {
+                const data = JSON.parse(output.trim());
+                if (!data.title || !data.id) return resolve(null);
+                resolve({
+                    id: data.id, title: data.title, artist: data.uploader || data.channel || 'YouTube',
+                    duration: data.duration, cover: data.thumbnail, link: cleanUrl, source: 'youtube'
+                });
+            } catch (error) {
+                reject(error);
             }
-
-            const title = m.title || oembedData?.title || 'Vídeo do YouTube';
-            const artist = m.uploader || m.channel || m.artist || oembedData?.author_name || 'YouTube';
-            const duration = m.duration || 0;
-            const cover = m.thumbnail || oembedData?.thumbnail_url || (videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : '');
-
-            resolve({
-                id: m.id || videoId || `yt_${Date.now()}`,
-                title,
-                artist,
-                album: '',
-                duration,
-                cover,
-                link: cleanUrl,
-                source: 'youtube'
-            });
         });
-        proc.on('error', () => {
+        proc.once('error', error => {
             clearTimeout(timer);
-            resolve({
-                id: videoId || `yt_${Date.now()}`,
-                title: oembedData?.title || 'Vídeo do YouTube',
-                artist: oembedData?.author_name || 'YouTube',
-                album: '',
-                duration: 0,
-                cover: oembedData?.thumbnail_url || (videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : ''),
-                link: cleanUrl,
-                source: 'youtube'
-            });
+            reject(error);
         });
     });
-}
-
-async function resolveDeezerAlbum(url) {
-    try {
-        const clean = extractUrl(url);
-        const match = clean.match(/deezer\.com\/.+?\/album\/(\d+)/);
-        if (!match) return [];
-        const res = await axios.get(`https://api.deezer.com/album/${match[1]}`);
-        const tracks = (res.data?.tracks?.data || []).slice(0, 100);
-        return tracks.map(t => ({
-            id: String(t.id),
-            title: t.title,
-            artist: t.artist?.name || res.data?.artist?.name || 'Desconhecido',
-            album: res.data?.title || '',
-            duration: t.duration,
-            cover: res.data?.cover_medium || '',
-            link: t.link,
-            source: 'deezer'
-        }));
-    } catch (_) {
-        return [];
-    }
 }
 
 function resolveYouTubePlaylist(url) {
@@ -207,10 +137,10 @@ function resolveYouTubePlaylist(url) {
         }
         args.push('--flat-playlist', '--playlist-end', '100', '-j', '--', cleanUrl);
 
-        const proc = spawn('yt-dlp', args);
+        const proc = spawn('yt-dlp', args, { stdio: ['ignore', 'pipe', 'ignore'] });
         let stdout = '';
         const timer = setTimeout(() => {
-            proc.kill();
+            proc.kill('SIGKILL');
         }, 35000);
 
         proc.stdout.on('data', (d) => { stdout += d.toString(); });
@@ -270,7 +200,7 @@ function resolveYouTubePlaylist(url) {
     });
 }
 
-function searchYouTubeTrack(query) {
+function searchYouTubeTrack(query, signal) {
     return new Promise((resolve) => {
         if (!query || !query.trim()) return resolve(null);
         const config = require('../config');
@@ -290,11 +220,9 @@ function searchYouTubeTrack(query) {
             `ytsearch1:${query.trim()}`
         );
 
-        const proc = spawn('yt-dlp', args);
+        const proc = spawn('yt-dlp', args, { signal, killSignal: 'SIGKILL', stdio: ['ignore', 'pipe', 'ignore'] });
         let stdout = '';
-        const timer = setTimeout(() => {
-            proc.kill();
-        }, 25000);
+        const timer = setTimeout(() => proc.kill('SIGKILL'), 25000);
 
         proc.stdout.on('data', (d) => { stdout += d.toString(); });
         proc.on('close', (code) => {
@@ -328,7 +256,10 @@ function searchYouTubeTrack(query) {
 }
 
 async function searchByName(query) {
-    const results = await searchDeezerTracks(query);
+    let results;
+    let providerError;
+    try { results = await searchDeezerTracks(query, { throwOnError: true }); }
+    catch (error) { providerError = error; }
     if (!results || results.length === 0) {
         const ytTrack = await searchYouTubeTrack(query);
         if (ytTrack) {
@@ -338,6 +269,7 @@ async function searchByName(query) {
                 results: []
             };
         }
+        if (providerError) throw providerError;
         return { track: null, ambiguous: false, results: [] };
     }
 
@@ -377,214 +309,124 @@ async function searchByName(query) {
     };
 }
 
-function downloadTrackToDisk(track, context = null) {
-    return new Promise(async (resolve, reject) => {
-        if (!track || !track.source) {
-            return reject(new Error('Objeto de faixa inválido ou fonte ausente'));
-        }
-
-        const logContext = context || {
-            source: 'Modo Rádio',
-            userId: track.addedBy || 'Desconhecido'
-        };
-
-        const arl = process.env.DEEZER_ARL || process.env.DEEMIX_ARL || '';
-        const scriptPath = path.join(__dirname, '../services/download_deezer.py');
-        const pythonBin = process.env.PYTHON_PATH || (process.platform === 'win32' ? 'python' : 'python3');
-
-        if (track.source === 'deezer') {
-            const link = track.link || `https://www.deezer.com/track/${track.id}`;
-            const proc = spawn(pythonBin, [scriptPath, link, TEMP_RADIO_DIR], {
-                env: {
-                    ...process.env,
-                    DEEZER_ARL: arl
-                }
-            });
-
-            let stdout = '';
-            const timer = setTimeout(() => {
-                proc.kill();
-            }, 60000);
-
-            proc.stdout.on('data', (d) => { stdout += d.toString(); });
-            proc.on('close', async () => {
-                clearTimeout(timer);
-                const match = stdout?.match(/DOWNLOADED_FILE:(.+)/);
-                if (match && match[1]) {
-                    const p = match[1].trim();
-                    if (fs.existsSync(p)) return resolve(p);
-                }
-                const files = fs.readdirSync(TEMP_RADIO_DIR)
-                    .filter(f => f.includes(track.id))
-                    .map(f => path.join(TEMP_RADIO_DIR, f));
-                if (files.length > 0) return resolve(files[0]);
-
-                const searchTarget = (track.title && track.artist && track.artist !== 'Desconhecido') 
-                    ? `${track.title} ${track.artist}`.trim() 
-                    : (track.title || null);
-                if (searchTarget) {
-                    try {
-                        const ytFallback = await searchYouTubeTrack(searchTarget);
-                        if (ytFallback && ytFallback.link) {
-                            const result = await downloadAudio(ytFallback.link, logContext);
-                            if (result && result.filePath && fs.existsSync(result.filePath)) {
-                                return resolve(result.filePath);
-                            }
-                        }
-                    } catch (_) {}
-                }
-
-                reject(new Error('Falha ao baixar faixa via deemix'));
-            });
-            proc.on('error', () => {
-                clearTimeout(timer);
-                reject(new Error('Falha ao executar processo Python'));
-            });
-        } else if (track.source === 'youtube') {
-            if (track.preDownloadedPath && fs.existsSync(track.preDownloadedPath)) {
-                return resolve(track.preDownloadedPath);
-            }
-
+function downloadProcess(command, args, signal) {
+    signal.throwIfAborted();
+    return new Promise((resolve, reject) => {
+        const grouped = process.platform !== 'win32';
+        const child = spawn(command, args, { detached: grouped, stdio: ['ignore', 'ignore', 'ignore'] });
+        function abort() {
             try {
-                const result = await downloadAudio(track.link, logContext);
-                if (result && result.filePath && fs.existsSync(result.filePath)) {
-                    return resolve(result.filePath);
-                }
-            } catch (_) {}
-
-            const searchTarget = (track.title && track.title !== 'Vídeo do YouTube') ? `${track.title} ${track.artist !== 'YouTube' ? track.artist : ''}`.trim() : null;
-            if (searchTarget) {
-                try {
-                    const deezerRes = await searchDeezerTracks(searchTarget);
-                    if (deezerRes && deezerRes.length > 0) {
-                        const fallbackTrack = {
-                            id: String(deezerRes[0].id),
-                            title: deezerRes[0].title,
-                            artist: deezerRes[0].artist,
-                            link: deezerRes[0].link,
-                            source: 'deezer'
-                        };
-                        const downloadedPath = await downloadTrackToDisk(fallbackTrack, logContext);
-                        return resolve(downloadedPath);
-                    }
-                } catch (_) {}
+                if (grouped && child.pid) process.kill(-child.pid, 'SIGKILL');
+                else child.kill('SIGKILL');
+            } catch (error) {
+                if (error.code !== 'ESRCH') child.kill('SIGKILL');
             }
-
-            reject(new Error('Falha ao baixar áudio do YouTube'));
-        } else {
-            reject(new Error('Fonte de áudio desconhecida'));
         }
+        signal.addEventListener('abort', abort, { once: true });
+        child.once('error', reject);
+        child.once('close', code => {
+            signal.removeEventListener('abort', abort);
+            if (signal.aborted) reject(signal.reason);
+            else if (code !== 0) reject(new Error(command + ' encerrou com código ' + code));
+            else resolve();
+        });
     });
 }
 
-async function resolveSpotify(url) {
-    try {
-        const cleanUrl = extractUrl(url);
-        let embedUrl = cleanUrl;
-        if (!cleanUrl.includes('/embed/')) {
-            embedUrl = cleanUrl.replace('open.spotify.com/', 'open.spotify.com/embed/');
+async function downloadTrackToDisk(track, { signal: callerSignal } = {}) {
+    const deadline = AbortSignal.timeout(60000);
+    const signal = callerSignal ? AbortSignal.any([callerSignal, deadline]) : deadline;
+    signal.throwIfAborted();
+    const directory = await fs.promises.mkdtemp(path.join(TEMP_RADIO_DIR, '.download-'));
+    const downloadYouTube = link => {
+        const cookies = config.ytdlpCookiesPath;
+        return downloadProcess('yt-dlp', [
+            ...(cookies && fs.existsSync(cookies) ? ['--cookies', cookies] : []),
+            ...(config.ytdlpExtraFlags || []), '--no-playlist', '--no-update',
+            '-f', 'bestaudio/best', '-o', path.join(directory, 'audio.%(ext)s'), '--', link
+        ], signal);
+    };
+
+    const outputFile = async () => (await fs.promises.readdir(directory, { withFileTypes: true }))
+        .find(file => file.isFile() && /\.(?:mp3|flac|m4a|webm|ogg|opus|mp4|aac|wav)$/i.test(file.name))?.name;
+    async function fromDeezer(id) {
+        if (!/^\d+$/.test(id)) return null;
+        const python = process.env.PYTHON_PATH || (process.platform === 'win32' ? 'python' : 'python3');
+        try {
+            await downloadProcess(python, [
+                path.join(__dirname, '../services/download_deezer.py'),
+                'https://www.deezer.com/track/' + id, directory
+            ], signal);
+            return await outputFile();
+        } catch (_) {
+            signal.throwIfAborted();
+            return null;
         }
-
-        const res = await axios.get(embedUrl, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            },
-            timeout: 7000
-        });
-
-        const match = res.data.match(/<script id="__NEXT_DATA__" type="application\/json">(.*?)<\/script>/);
-        if (match) {
-            const json = JSON.parse(match[1]);
-            const entity = json?.props?.pageProps?.state?.data?.entity;
-
-            if (entity) {
-                if (entity.type === 'track') {
-                    const title = entity.name || entity.title || '';
-                    const artist = entity.artists ? entity.artists.map(a => a.name).join(', ') : '';
-                    const query = `${title} ${artist}`.trim();
-
-                    const deezerRes = await searchDeezerTracks(query);
-                    if (deezerRes && deezerRes.length > 0) {
-                        const t = deezerRes[0];
-                        return {
-                            type: 'track',
-                            track: {
-                                id: String(t.id),
-                                title: t.title,
-                                artist: t.artist?.name || artist || 'Desconhecido',
-                                album: t.album?.title || '',
-                                duration: t.duration,
-                                cover: t.album?.cover_medium || entity.visualIdentity?.image?.[0]?.url || '',
-                                link: t.link,
-                                source: 'deezer'
-                            }
-                        };
-                    }
-                }
-
-                if ((entity.type === 'album' || entity.type === 'playlist') && Array.isArray(entity.trackList)) {
-                    const resolvedTracks = [];
-                    for (const item of entity.trackList) {
-                        const title = item.title || item.name;
-                        const artist = item.subtitle || (item.artists ? item.artists.map(a => a.name).join(', ') : '');
-                        const query = `${title} ${artist}`.trim();
-                        if (!query) continue;
-
-                        try {
-                            const deezerRes = await searchDeezerTracks(query);
-                            if (deezerRes && deezerRes.length > 0) {
-                                const t = deezerRes[0];
-                                resolvedTracks.push({
-                                    id: String(t.id),
-                                    title: t.title,
-                                    artist: t.artist?.name || artist || 'Desconhecido',
-                                    album: t.album?.title || '',
-                                    duration: t.duration,
-                                    cover: t.album?.cover_medium || '',
-                                    link: t.link,
-                                    source: 'deezer'
-                                });
-                            }
-                        } catch (_) {}
-                    }
-
-                    if (resolvedTracks.length > 0) {
-                        return { type: 'playlist', tracks: resolvedTracks };
-                    }
-                }
-            }
-        }
-    } catch (_) {}
+    }
 
     try {
-        const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(url)}`;
-        const res = await axios.get(oembedUrl, { timeout: 5000 });
-        if (res.data && res.data.title) {
-            const title = res.data.title;
-            const deezerRes = await searchDeezerTracks(title);
-            if (deezerRes && deezerRes.length > 0) {
-                const t = deezerRes[0];
-                return {
-                    type: 'track',
-                    track: {
-                        id: String(t.id),
-                        title: t.title,
-                        artist: t.artist?.name || 'Desconhecido',
-                        album: t.album?.title || '',
-                        duration: t.duration,
-                        cover: t.album?.cover_medium || res.data.thumbnail_url || '',
-                        link: t.link,
-                        source: 'deezer'
-                    }
-                };
+        let file;
+        if (track.source === 'youtube') {
+            try {
+                await downloadYouTube(track.link);
+                file = await outputFile();
+            } catch (_) {
+                signal.throwIfAborted();
+            }
+            if (!file && !track.preferDeezer) {
+                const match = await convertYouTubeTrackToDeezer(track, signal);
+                if (match.source === 'deezer') file = await fromDeezer(match.id);
+            }
+        } else if (track.source === 'deezer') {
+            file = await fromDeezer(track.id);
+            if (!file) {
+                const fallback = track.youtubeFallback ||
+                    (await searchYouTubeTrack([track.title, track.artist].filter(Boolean).join(' '), signal))?.link;
+                if (!fallback) throw new Error('Nenhuma fonte de áudio disponível.');
+                await downloadYouTube(fallback);
+                file = await outputFile();
             }
         }
-    } catch (_) {}
-
-    return null;
+        signal.throwIfAborted();
+        if (!file) throw new Error('O provedor não entregou um arquivo de áudio.');
+        const destination = path.join(TEMP_RADIO_DIR, randomUUID() + path.extname(file));
+        await fs.promises.rename(path.join(directory, file), destination);
+        return destination;
+    } finally {
+        await fs.promises.rm(directory, { recursive: true, force: true });
+    }
 }
 
-async function convertYouTubeTrackToDeezer(ytTrack) {
+async function resolveSpotify(url) {
+    const [, type, id] = url.pathname.match(/^\/(?:intl-[a-z]+\/|embed\/)?(track|album|playlist)\/([a-zA-Z0-9]+)\/?$/) || [];
+    if (!id) return null;
+    const { data } = await axios.get('https://open.spotify.com/embed/' + type + '/' + id, { timeout: 7000 });
+    const script = data.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
+    const entity = script && JSON.parse(script[1])?.props?.pageProps?.state?.data?.entity;
+    const artist = item => item.subtitle || item.artists?.map(value => value.name).join(', ') || '';
+    const toTrack = item => ({
+        title: item.title || item.name, artist: artist(item),
+        duration: item.duration ? Math.round(item.duration / 1000) : 0,
+        source: 'spotify'
+    });
+    if (type === 'track') {
+        const track = entity && toTrack(entity);
+        if (track?.title) {
+            track.cover = entity.visualIdentity?.image?.[0]?.url;
+            return { type: 'track', track };
+        }
+        const { data: preview } = await axios.get('https://open.spotify.com/oembed', {
+            params: { url: url.href }, timeout: 5000
+        });
+        return preview?.title ? {
+            type: 'track', track: { title: preview.title, cover: preview.thumbnail_url, source: 'spotify' }
+        } : null;
+    }
+    const tracks = (entity?.trackList || []).slice(0, 100).map(toTrack).filter(track => track.title);
+    return tracks.length ? { type: 'playlist', tracks } : null;
+}
+
+async function convertYouTubeTrackToDeezer(ytTrack, signal) {
     if (!ytTrack || !ytTrack.title || ytTrack.title === 'Vídeo do YouTube') return ytTrack;
 
     const rawTitle = ytTrack.title
@@ -606,9 +448,10 @@ async function convertYouTubeTrackToDeezer(ytTrack) {
     const query = `${rawTitle} ${artistStr}`.trim();
 
     try {
-        let deezerRes = await searchDeezerTracks(query);
-        if (!deezerRes || deezerRes.length === 0) {
-            deezerRes = await searchDeezerTracks(rawTitle);
+        let deezerRes = await searchDeezerTracks(query, { signal });
+        signal?.throwIfAborted();
+        if (query !== rawTitle && (!deezerRes || deezerRes.length === 0)) {
+            deezerRes = await searchDeezerTracks(rawTitle, { signal });
         }
 
         if (deezerRes && deezerRes.length > 0) {
@@ -641,74 +484,73 @@ async function convertYouTubeTrackToDeezer(ytTrack) {
     return ytTrack;
 }
 
+async function resolvePlaybackTrack(track, signal) {
+    signal?.throwIfAborted();
+    if (track.source === 'spotify' || track.preferDeezer) {
+        const target = await convertYouTubeTrackToDeezer(track, signal);
+        signal?.throwIfAborted();
+        if (target.source === 'deezer') {
+            return { ...target, youtubeFallback: track.source === 'youtube' ? track.link : undefined };
+        }
+        if (track.source === 'spotify') {
+            const fallback = await searchYouTubeTrack([track.title, track.artist].filter(Boolean).join(' '), signal);
+            signal?.throwIfAborted();
+            if (!fallback) throw new Error('Nenhuma fonte compatível para a faixa do Spotify.');
+            return fallback;
+        }
+    }
+    return track;
+}
+
 async function resolveInput(input, guildId = null) {
     input = (input || '').trim();
     const cleanUrl = extractUrl(input);
-    const hasHttp = /^https?:\/\//i.test(cleanUrl);
-
     const { getSession } = require('./radioDatabase');
-    const session = guildId ? getSession(guildId) : null;
-    const isFast = session?.streamMode === 'FAST';
+    const isFast = guildId && getSession(guildId)?.streamMode === 'FAST';
 
-    if (hasHttp) {
-        if (isSpotifyUrl(cleanUrl)) {
-            const spotifyResult = await resolveSpotify(cleanUrl);
-            if (spotifyResult) return spotifyResult;
-        }
-        if (isDeezerPlaylist(cleanUrl)) {
-            const tracks = await resolveDeezerPlaylist(cleanUrl);
-            if (tracks && tracks.length > 0) return { type: 'playlist', tracks };
-        }
-        if (isDeezerAlbum(cleanUrl)) {
-            const tracks = await resolveDeezerAlbum(cleanUrl);
-            if (tracks && tracks.length > 0) return { type: 'playlist', tracks };
-        }
-        if (isDeezerUrl(cleanUrl)) {
-            const track = await resolveDeezerTrack(cleanUrl);
-            if (track) return { type: 'track', track };
-        }
-        if (isYouTubePlaylist(cleanUrl)) {
-            const tracks = await resolveYouTubePlaylist(cleanUrl);
-            if (tracks && tracks.length > 0) {
-                if (isFast) {
-                    const converted = [];
-                    for (const t of tracks) {
-                        converted.push(await convertYouTubeTrackToDeezer(t));
-                        if (tracks.length > 5) {
-                            await new Promise(r => setTimeout(r, 60));
-                        }
+    try {
+        if (isValidHttpUrl(cleanUrl)) {
+            const url = new URL(cleanUrl);
+            const deezer = deezerRoute(url);
+            let result;
+            if (deezer) {
+                result = await resolveDeezer(deezer);
+            } else if (url.hostname === 'open.spotify.com' || url.hostname === 'spoti.fi') {
+                if (url.hostname === 'spoti.fi') {
+                    const redirect = await axios.get(url.href, {
+                        timeout: 5000, maxRedirects: 0, validateStatus: status => status >= 300 && status < 400
+                    });
+                    const target = new URL(redirect.headers.location);
+                    if (target.protocol !== 'https:' || target.hostname !== 'open.spotify.com') return { type: 'not_found' };
+                    result = await resolveSpotify(target);
+                } else {
+                    result = await resolveSpotify(url);
+                }
+            } else if (isYouTubeUrl(url)) {
+                if (url.searchParams.has('list')) {
+                    const tracks = await resolveYouTubePlaylist(cleanUrl);
+                    if (tracks.length) {
+                        return { type: 'playlist', tracks: tracks.map(track => ({ ...track, preferDeezer: !!isFast })) };
                     }
-                    return { type: 'playlist', tracks: converted };
+                    if (!url.searchParams.has('v')) return { type: 'not_found' };
                 }
-                return { type: 'playlist', tracks };
+                const track = await resolveYouTubeTrack(cleanUrl);
+                if (track) result = { type: 'track', track: { ...track, preferDeezer: !!isFast } };
             }
+            return result || { type: 'not_found' };
         }
-        if (isYouTubeUrl(cleanUrl)) {
-            const track = await resolveYouTubeTrack(cleanUrl);
-            if (track) {
-                if (isFast) {
-                    const converted = await convertYouTubeTrackToDeezer(track);
-                    return { type: 'track', track: converted };
-                }
-                return { type: 'track', track };
-            }
-        }
-    }
 
-    const result = await searchByName(input);
-    if (result.ambiguous) {
-        return { type: 'ambiguous', results: result.results };
+        const result = await searchByName(input);
+        if (result.ambiguous) return { type: 'ambiguous', results: result.results.slice(0, 10) };
+        if (result.track) return { type: 'track', track: result.track };
+        return { type: 'not_found' };
+    } catch (error) {
+        if (error?.response?.status === 404) return { type: 'not_found' };
+        return { type: 'unavailable' };
     }
-    if (result.track) {
-        return { type: 'track', track: result.track };
-    }
-    return { type: 'not_found' };
 }
 
 module.exports = {
-    resolveInput,
-    downloadTrackToDisk,
-    searchByName,
-    searchYouTubeTrack,
-    TEMP_RADIO_DIR
+    resolveInput, resolvePlaybackTrack, downloadTrackToDisk, searchByName,
+    searchYouTubeTrack, TEMP_RADIO_DIR
 };

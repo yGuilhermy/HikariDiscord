@@ -32,10 +32,11 @@ function calculateConfidenceScore(query, track) {
     return score;
 }
 
-async function searchDeezerTracks(query) {
+async function searchDeezerTracks(query, { signal, throwOnError = false } = {}) {
     try {
         const searchUrl = `https://api.deezer.com/search?q=${encodeURIComponent(query)}`;
-        const response = await axios.get(searchUrl);
+        const response = await axios.get(searchUrl, { timeout: 5000, signal });
+        if (throwOnError && response.data?.error) throw new Error('Busca Deezer indisponível.');
         const items = response.data?.data || [];
         
         return items.slice(0, 5).map(item => ({
@@ -48,6 +49,8 @@ async function searchDeezerTracks(query) {
             cover: item.album?.cover_medium || item.album?.cover || ''
         }));
     } catch (error) {
+        if (signal?.aborted) throw signal.reason;
+        if (throwOnError) throw error;
         console.error('[DeezerService] Erro ao buscar faixas:', error.message);
         return [];
     }

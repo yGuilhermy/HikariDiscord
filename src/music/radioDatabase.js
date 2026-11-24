@@ -1,8 +1,8 @@
 const fs = require('fs');
 const path = require('path');
+const { randomUUID } = require('node:crypto');
 
 const DATA_DIR = path.join(__dirname, 'data');
-const SESSION_FILE = path.join(DATA_DIR, 'radio_sessions.json');
 const SETTINGS_FILE = path.join(DATA_DIR, 'radio_guild_settings.json');
 
 if (!fs.existsSync(DATA_DIR)) {
@@ -25,8 +25,13 @@ function _saveGuildSettings() {
     try {
         const obj = {};
         guildSettingsMap.forEach((v, k) => { obj[k] = v; });
-        fs.writeFileSync(SETTINGS_FILE, JSON.stringify(obj, null, 2));
-    } catch (_) {}
+        const temporaryFile = SETTINGS_FILE + '.tmp';
+        fs.writeFileSync(temporaryFile, JSON.stringify(obj, null, 2), { mode: 0o600 });
+        fs.renameSync(temporaryFile, SETTINGS_FILE);
+    } catch (error) {
+        try { fs.unlinkSync(SETTINGS_FILE + '.tmp'); } catch (_) {}
+        console.error('[RadioDatabase] Não foi possível salvar as preferências do rádio:', error.code || error.message);
+    }
 }
 
 _loadGuildSettings();
@@ -42,16 +47,14 @@ function saveGuildSavedSettings(guildId, patch) {
     _saveGuildSettings();
 }
 
-function _save() {}
-
 function _generateShuffleOrder(session) {
     if (!session || !Array.isArray(session.playlist) || session.playlist.length === 0) {
         session.shuffleOrder = [];
-        session.shufflePos = 0;
+        session.shufflePos = -1;
         return;
     }
     const total = session.playlist.length;
-    const current = (session.currentIndex >= 0 && session.currentIndex < total) ? session.currentIndex : 0;
+    const current = session.currentIndex;
     const remaining = [];
     for (let i = 0; i < total; i++) {
         if (i !== current) remaining.push(i);
@@ -60,8 +63,8 @@ function _generateShuffleOrder(session) {
         const j = Math.floor(Math.random() * (i + 1));
         [remaining[i], remaining[j]] = [remaining[j], remaining[i]];
     }
-    session.shuffleOrder = [current, ...remaining];
-    session.shufflePos = 0;
+    session.shuffleOrder = current >= 0 ? [current, ...remaining] : remaining;
+    session.shufflePos = current >= 0 ? 0 : -1;
 }
 
 function _syncLegacyFields(session) {
@@ -69,7 +72,7 @@ function _syncLegacyFields(session) {
     if (!Array.isArray(session.playlist)) session.playlist = [];
     if (typeof session.currentIndex !== 'number') session.currentIndex = -1;
     if (!Array.isArray(session.shuffleOrder)) session.shuffleOrder = [];
-    if (typeof session.shufflePos !== 'number') session.shufflePos = 0;
+    if (typeof session.shufflePos !== 'number') session.shufflePos = -1;
     session.isHybrid = !!session.isHybrid;
     if (session.isHybrid) {
         const validModes = ['HYBRID', 'CHAT_ONLY', 'MUSIC_DIRECT', 'MUSIC_IA', 'OFF'];
@@ -92,14 +95,17 @@ function _syncLegacyFields(session) {
             ? session.playlist[session.currentIndex] 
             : null;
     }
-    session.history = session.playlist.slice(0, Math.max(0, session.currentIndex));
-    session.queue = session.playlist.slice(Math.max(0, session.currentIndex + 1));
+    const order = playbackOrder(session);
+    const cursor = session.shuffle ? session.shufflePos : session.currentIndex;
+    session.history = order.slice(0, Math.max(0, cursor)).map(index => session.playlist[index]);
+    session.queue = order.slice(Math.max(0, cursor + 1)).map(index => session.playlist[index]);
 }
 
 function createSession(guildId, voiceChannelId, textChannelId, isHybrid = false) {
     const saved = getGuildSavedSettings(guildId) || {};
     const defaultVoiceMode = isHybrid ? (saved.hybridVoiceMode || 'HYBRID') : (saved.voiceMode || 'DIRECT');
     const session = {
+        id: randomUUID(),
         guildId,
         voiceChannelId,
         textChannelId,
@@ -108,18 +114,20 @@ function createSession(guildId, voiceChannelId, textChannelId, isHybrid = false)
         loopMode: 'OFF',
         shuffle: false,
         shuffleOrder: [],
-        shufflePos: 0,
+        shufflePos: -1,
         isHybrid: !!isHybrid,
         voiceMode: defaultVoiceMode,
         voiceListening: defaultVoiceMode !== 'OFF',
         streamMode: saved.streamMode || 'HYBRID',
         currentIndex: -1,
         playlist: [],
-        listeners: []
+        listeners: [],
+        exhausted: false,
+        playbackError: null,
+        voiceCooldownUntil: 0
     };
     _syncLegacyFields(session);
     sessions.set(guildId, session);
-    _save();
     return session;
 }
 
@@ -132,7 +140,11 @@ function getSession(guildId) {
 function updateSession(guildId, patch) {
     const s = sessions.get(guildId);
     if (!s) return null;
-    Object.assign(s, patch);
+    const { currentTrack, ...fields } = patch;
+    if (currentTrack?.localPath && s.playlist[s.currentIndex] && (!currentTrack.entryId || s.playlist[s.currentIndex].entryId === currentTrack.entryId)) {
+        s.playlist[s.currentIndex].localPath = currentTrack.localPath;
+    }
+    Object.assign(s, fields);
     _syncLegacyFields(s);
     if (patch.voiceMode !== undefined || patch.streamMode !== undefined || patch.isHybrid !== undefined) {
         saveGuildSavedSettings(guildId, {
@@ -140,13 +152,11 @@ function updateSession(guildId, patch) {
             ...(patch.streamMode !== undefined && { streamMode: patch.streamMode })
         });
     }
-    _save();
     return s;
 }
 
 function destroySession(guildId) {
     sessions.delete(guildId);
-    _save();
 }
 
 function hasActiveSession(guildId) {
@@ -157,7 +167,7 @@ function addTrackToQueue(guildId, track) {
     const s = sessions.get(guildId);
     if (!s) return null;
     if (!Array.isArray(s.playlist)) s.playlist = [];
-    s.playlist.push(track);
+    s.playlist.push({ ...track, entryId: randomUUID() });
     const newIdx = s.playlist.length - 1;
     if (s.shuffle && Array.isArray(s.shuffleOrder)) {
         const unplayedRange = Math.max(0, s.shuffleOrder.length - s.shufflePos - 1);
@@ -165,7 +175,6 @@ function addTrackToQueue(guildId, track) {
         s.shuffleOrder.splice(s.shufflePos + 1 + insertOffset, 0, newIdx);
     }
     _syncLegacyFields(s);
-    _save();
     return s.playlist.length;
 }
 
@@ -173,127 +182,85 @@ function skipToTrack(guildId, position) {
     const s = sessions.get(guildId);
     if (!s || !Array.isArray(s.playlist)) return null;
     const targetIdx = position - 1;
-    if (targetIdx < 0 || targetIdx >= s.playlist.length) return null;
+    if (!Number.isInteger(targetIdx) || targetIdx < 0 || targetIdx >= s.playlist.length) return null;
     s.currentIndex = targetIdx;
-    s.status = 'PLAYING';
+    s.status = 'BUFFERING';
+    s.exhausted = false;
+    s.playbackError = null;
     if (s.shuffle) {
         _generateShuffleOrder(s);
     }
     _syncLegacyFields(s);
-    _save();
     return s;
 }
 
-function peekNextTrack(guildId) {
-    const s = sessions.get(guildId);
-    if (!s || !Array.isArray(s.playlist) || s.playlist.length === 0) return null;
+function playbackOrder(session) {
+    return session.shuffle ? session.shuffleOrder : session.playlist.map((_, index) => index);
+}
 
-    if (s.loopMode === 'TRACK' && s.currentIndex >= 0 && s.currentIndex < s.playlist.length) {
-        return s.playlist[s.currentIndex];
+function nextIndex(session, { reason = 'manual', excluded = new Set() } = {}) {
+    const { playlist, currentIndex, loopMode } = session;
+    if (reason === 'ended' && loopMode === 'TRACK' && playlist[currentIndex]) return currentIndex;
+
+    const order = playbackOrder(session);
+    const cursor = session.shuffle ? session.shufflePos : currentIndex;
+    const candidates = order.slice(cursor + 1);
+    if (loopMode === 'QUEUE') candidates.push(...order.slice(0, cursor + 1));
+    return candidates.find(index => playlist[index] && !excluded.has(playlist[index].entryId)) ?? -1;
+}
+
+function peekNextTrack(guildId, options = { reason: 'ended' }) {
+    const session = sessions.get(guildId);
+    return session?.playlist[nextIndex(session, options)] ?? null;
+}
+
+function canGoPrevious(session) {
+    return (session.shuffle ? session.shufflePos : session.currentIndex) > 0;
+}
+
+function playedIndices(session) {
+    const cursor = session.shuffle ? session.shufflePos : session.currentIndex;
+    return new Set(playbackOrder(session).slice(0, session.exhausted ? undefined : Math.max(0, cursor)));
+}
+
+function selectTrack(session, index) {
+    session.currentIndex = index;
+    if (session.shuffle) session.shufflePos = session.shuffleOrder.indexOf(index);
+    session.status = 'BUFFERING';
+    session.exhausted = false;
+    session.playbackError = null;
+    _syncLegacyFields(session);
+    return session.currentTrack;
+}
+
+function firstTrack(guildId) {
+    const session = sessions.get(guildId);
+    if (!session?.playlist.length) return null;
+    if (session.shuffle) {
+        session.currentIndex = -1;
+        _generateShuffleOrder(session);
     }
+    return selectTrack(session, playbackOrder(session)[0]);
+}
 
-    if (s.shuffle && s.playlist.length > 1) {
-        if (!Array.isArray(s.shuffleOrder) || s.shuffleOrder.length !== s.playlist.length) {
-            _generateShuffleOrder(s);
-        }
-        const nextPos = s.shufflePos + 1;
-        if (nextPos < s.shuffleOrder.length) {
-            const idx = s.shuffleOrder[nextPos];
-            return s.playlist[idx] || null;
-        } else if (s.loopMode === 'QUEUE') {
-            const idx = s.shuffleOrder[0];
-            return s.playlist[idx] || null;
-        } else {
-            return null;
-        }
-    }
-
-    const nextIdx = s.currentIndex + 1;
-    if (nextIdx < s.playlist.length) {
-        return s.playlist[nextIdx];
-    } else if (s.loopMode === 'QUEUE') {
-        return s.playlist[0] || null;
+function nextTrack(guildId, options = {}) {
+    const session = sessions.get(guildId);
+    if (!session?.playlist.length) return null;
+    const index = nextIndex(session, options);
+    if (index >= 0) return selectTrack(session, index);
+    if (options.reason === 'ended' || options.reason === 'failed') {
+        session.status = 'STOPPED';
+        session.exhausted = true;
+        _syncLegacyFields(session);
     }
     return null;
 }
 
-function nextTrack(guildId) {
-    const s = sessions.get(guildId);
-    if (!s || !Array.isArray(s.playlist) || s.playlist.length === 0) return null;
-
-    if (s.loopMode === 'TRACK' && s.currentIndex >= 0 && s.currentIndex < s.playlist.length) {
-        s.status = 'PLAYING';
-        _syncLegacyFields(s);
-        _save();
-        return s.playlist[s.currentIndex];
-    }
-
-    if (s.shuffle && s.playlist.length > 1) {
-        if (!Array.isArray(s.shuffleOrder) || s.shuffleOrder.length !== s.playlist.length) {
-            _generateShuffleOrder(s);
-        }
-        const nextPos = s.shufflePos + 1;
-        if (nextPos < s.shuffleOrder.length) {
-            s.shufflePos = nextPos;
-            s.currentIndex = s.shuffleOrder[s.shufflePos];
-            s.status = 'PLAYING';
-        } else if (s.loopMode === 'QUEUE') {
-            _generateShuffleOrder(s);
-            s.shufflePos = 0;
-            s.currentIndex = s.shuffleOrder[0];
-            s.status = 'PLAYING';
-        } else {
-            s.status = 'STOPPED';
-            _syncLegacyFields(s);
-            _save();
-            return null;
-        }
-    } else {
-        const nextIdx = s.currentIndex + 1;
-        if (nextIdx < s.playlist.length) {
-            s.currentIndex = nextIdx;
-            s.status = 'PLAYING';
-        } else if (s.loopMode === 'QUEUE') {
-            s.currentIndex = 0;
-            s.status = 'PLAYING';
-        } else {
-            s.status = 'STOPPED';
-            _syncLegacyFields(s);
-            _save();
-            return null;
-        }
-    }
-
-    _syncLegacyFields(s);
-    _save();
-    return s.currentTrack;
-}
-
 function prevTrack(guildId) {
-    const s = sessions.get(guildId);
-    if (!s || !Array.isArray(s.playlist) || s.playlist.length === 0) return null;
-
-    if (s.shuffle && s.playlist.length > 1) {
-        if (Array.isArray(s.shuffleOrder) && s.shufflePos > 0) {
-            s.shufflePos--;
-            s.currentIndex = s.shuffleOrder[s.shufflePos];
-            s.status = 'PLAYING';
-        } else {
-            s.status = 'PLAYING';
-        }
-    } else {
-        if (s.currentIndex > 0) {
-            s.currentIndex--;
-            s.status = 'PLAYING';
-        } else {
-            s.currentIndex = 0;
-            s.status = 'PLAYING';
-        }
-    }
-
-    _syncLegacyFields(s);
-    _save();
-    return s.currentTrack;
+    const session = sessions.get(guildId);
+    if (!session || !canGoPrevious(session)) return null;
+    const cursor = session.shuffle ? session.shufflePos : session.currentIndex;
+    return selectTrack(session, playbackOrder(session)[cursor - 1]);
 }
 
 function setLoopMode(guildId) {
@@ -302,7 +269,6 @@ function setLoopMode(guildId) {
     const modes = ['OFF', 'TRACK', 'QUEUE'];
     const idx = modes.indexOf(s.loopMode);
     s.loopMode = modes[(idx + 1) % modes.length];
-    _save();
     return s.loopMode;
 }
 
@@ -316,7 +282,6 @@ function toggleShuffle(guildId) {
         s.shuffleOrder = [];
         s.shufflePos = 0;
     }
-    _save();
     return s.shuffle;
 }
 
@@ -326,7 +291,6 @@ function toggleVoiceListening(guildId) {
     s.voiceListening = !s.voiceListening;
     s.voiceMode = s.voiceListening ? 'IA' : 'OFF';
     saveGuildSavedSettings(guildId, { voiceMode: s.voiceMode });
-    _save();
     return s.voiceListening;
 }
 
@@ -341,8 +305,7 @@ function cycleVoiceMode(guildId) {
         s.voiceMode = nextMode;
         s.voiceListening = (nextMode !== 'OFF');
         saveGuildSavedSettings(guildId, { hybridVoiceMode: s.voiceMode });
-        _save();
-        return s.voiceMode;
+            return s.voiceMode;
     } else {
         const modes = ['OFF', 'IA', 'DIRECT'];
         const currentMode = s.voiceMode || (s.voiceListening ? 'IA' : 'OFF');
@@ -351,8 +314,7 @@ function cycleVoiceMode(guildId) {
         s.voiceMode = nextMode;
         s.voiceListening = (nextMode !== 'OFF');
         saveGuildSavedSettings(guildId, { voiceMode: s.voiceMode });
-        _save();
-        return s.voiceMode;
+            return s.voiceMode;
     }
 }
 
@@ -370,7 +332,6 @@ function setSessionHybridMode(guildId, isHybrid) {
         s.voiceListening = (s.voiceMode !== 'OFF');
     }
     _syncLegacyFields(s);
-    _save();
     return s;
 }
 
@@ -379,61 +340,49 @@ function getAllSessions() {
 }
 
 function stopRadio(guildId) {
-    const s = sessions.get(guildId);
-    if (!s) return null;
-    s.status = 'STOPPED';
-    s.playlist = [];
-    s.currentIndex = -1;
-    s.currentTrack = null;
-    s.shuffleOrder = [];
-    s.shufflePos = 0;
-    _syncLegacyFields(s);
-    _save();
-    return s;
+    const session = sessions.get(guildId);
+    if (!session) return null;
+    session.status = 'STOPPED';
+    session.currentIndex = -1;
+    session.exhausted = false;
+    session.playbackError = null;
+    if (session.shuffle) _generateShuffleOrder(session);
+    _syncLegacyFields(session);
+    return session;
 }
 
 function removeTrackFromPlaylist(guildId, position) {
-    const s = sessions.get(guildId);
-    if (!s || !Array.isArray(s.playlist) || s.playlist.length === 0) return null;
-    const idx = position - 1;
-    if (idx < 0 || idx >= s.playlist.length) return null;
+    const session = sessions.get(guildId);
+    const index = position - 1;
+    if (!session || !Number.isInteger(index) || !session.playlist[index]) return null;
 
-    const removedTrack = s.playlist.splice(idx, 1)[0];
-    const isCurrent = (idx === s.currentIndex);
-
-    if (s.shuffle && Array.isArray(s.shuffleOrder)) {
-        const orderIdx = s.shuffleOrder.indexOf(idx);
-        if (orderIdx !== -1) {
-            s.shuffleOrder.splice(orderIdx, 1);
-            if (orderIdx < s.shufflePos) {
-                s.shufflePos = Math.max(0, s.shufflePos - 1);
-            }
-        }
-        s.shuffleOrder = s.shuffleOrder.map(i => i > idx ? i - 1 : i);
+    const { currentIndex, status } = session;
+    const isCurrent = index === currentIndex && status !== 'STOPPED';
+    const orderIndex = session.shuffle ? session.shuffleOrder.indexOf(index) : index;
+    const [removedTrack] = session.playlist.splice(index, 1);
+    if (session.shuffle) {
+        session.shuffleOrder.splice(orderIndex, 1);
+        session.shuffleOrder = session.shuffleOrder.map(i => i > index ? i - 1 : i);
+        if (orderIndex <= session.shufflePos) session.shufflePos--;
     }
 
-    if (s.playlist.length === 0) {
-        s.currentIndex = -1;
-        s.currentTrack = null;
-        s.status = 'STOPPED';
-        s.shuffleOrder = [];
-        s.shufflePos = 0;
-    } else if (idx < s.currentIndex) {
-        s.currentIndex -= 1;
-    } else if (idx === s.currentIndex) {
-        if (s.currentIndex >= s.playlist.length) {
-            s.currentIndex = s.playlist.length - 1;
+    let newCurrentTrack = null;
+    if (isCurrent) {
+        const order = playbackOrder(session);
+        const next = order[orderIndex] ?? (session.loopMode === 'QUEUE' ? order[0] : undefined);
+        if (next !== undefined) {
+            newCurrentTrack = selectTrack(session, next);
+        } else {
+            session.status = 'STOPPED';
+            session.exhausted = session.playlist.length > 0;
+            session.currentIndex = session.playlist.length - 1;
         }
+    } else if (index <= currentIndex) {
+        session.currentIndex--;
     }
-    _syncLegacyFields(s);
-    _save();
+    _syncLegacyFields(session);
 
-    return {
-        removedTrack,
-        isCurrent,
-        remainingCount: s.playlist.length,
-        newCurrentTrack: s.currentTrack
-    };
+    return { removedTrack, isCurrent, remainingCount: session.playlist.length, newCurrentTrack, previousStatus: status };
 }
 
 function toggleStreamMode(guildId) {
@@ -441,7 +390,6 @@ function toggleStreamMode(guildId) {
     if (!s) return null;
     s.streamMode = s.streamMode === 'FAST' ? 'HYBRID' : 'FAST';
     saveGuildSavedSettings(guildId, { streamMode: s.streamMode });
-    _save();
     return s.streamMode;
 }
 
@@ -455,6 +403,9 @@ module.exports = {
     skipToTrack,
     peekNextTrack,
     nextTrack,
+    firstTrack,
+    canGoPrevious,
+    playedIndices,
     prevTrack,
     setLoopMode,
     toggleShuffle,

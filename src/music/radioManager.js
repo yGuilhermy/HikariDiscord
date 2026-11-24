@@ -1,39 +1,26 @@
 const {
-    joinVoiceChannel,
-    getVoiceConnection,
-    VoiceConnectionStatus,
-    entersState,
-    EndBehaviorType
+    joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus, entersState, EndBehaviorType
 } = require('@discordjs/voice');
 const { PermissionFlagsBits } = require('discord.js');
+const { randomUUID } = require('node:crypto');
 const prism = require('prism-media');
+const { checkBan } = require('../handlers/banHandler');
 const { transcribeAudio } = require('../services/sttService');
-const {
-    createSession,
-    getSession,
-    destroySession,
-    updateSession,
-    nextTrack,
-    prevTrack,
-    skipToTrack,
-    addTrackToQueue,
-    toggleVoiceListening,
-    setLoopMode,
-    toggleShuffle,
-    removeTrackFromPlaylist,
-    stopRadio
-} = require('./radioDatabase');
-const { playTrack, pausePlayer, resumePlayer, stopPlayer, updateEmbed } = require('./radioAudioPlayer');
-const { buildRadioEmbed } = require('./radioEmbed');
-const { resolveInput } = require('./radioProviders');
-const { prefetchNextTrack, cleanupSessionAudioFiles } = require('./radioPrefetcher');
-
-const radioAmbiguousSessions = new Map();
-const userLastVoiceCommand = new Map();
-const emptyChannelIntervals = new Map();
+const { createSession, getSession, destroySession, setSessionHybridMode } = require('./radioDatabase');
+const { stopPlayer, updateEmbed, deletePanel } = require('./radioAudioPlayer');
+const { cleanupSessionAudioFiles } = require('./radioPrefetcher');
+const { sessionMatches, cancelSearches } = require('./radioSearch');
+const { parseRadioIntent } = require('./radioIntentEngine');
 const radioMCPTools = require('./radioMCPTools.json');
 
+const starts = new Map();
+const voiceCooldownMs = 60000;
+const maxCaptureBytes = 48000 * 2 * 2 * 30;
 const RADIO_TRIGGER_REGEX = /\b(hikari|hikare|hikary|hikarii|hikarie|hikaris|hicari|hicare|hicary|hicarii|hicaris|hikario|hicario|hikaru|hicaru|hikar|hicar|ikari|ikare|ikary|ikarii|ikaris|icari|icare|icaro|icary|icarii|icaris|icara|icaras|icaros|ikario|icario|ikaru|icaru|ikar|icar|ricardo|ricard|ricardi|ricari|ricare|rikari|rikare|ricario|ricarto|recari|recaro|ricar|ricardin|ricardinho|ficari|ficare|vicari|vicare|ficardo|vicardo|dicari|dicare|kikari|kicari|ticari|ih\s*cari|e\s*cari|eh\s*cari|i\s*cari|re\s*cari|ri\s*cari|hi\s*cari|he\s*cari|a\s*cari|o\s*cari|ei\s*cari|oh\s*cari|oi\s*cari)\b/i;
+const ignoredTranscripts = [
+    'legendas pela comunidade', 'subtítulos', 'subtitulos', 'obrigado por assistir',
+    'inscreva-se', 'curta e compartilhe', 'amara.org'
+];
 
 function createWavHeader(pcmLength, sampleRate = 48000, numChannels = 2, bitsPerSample = 16) {
     const header = Buffer.alloc(44);
@@ -66,867 +53,248 @@ function calculatePcmRms(pcmBuffer) {
     return Math.sqrt(sumSquares / numSamples);
 }
 
-async function startRadioMode(member, textChannel, client) {
+async function connectRadio(member, textChannel, client, isHybrid) {
     const voiceChannel = member?.voice?.channel;
-    if (!voiceChannel) return { success: false, error: '⚠️ Você precisa estar em um canal de voz para ativar o Modo Rádio.' };
-
-    const me = voiceChannel.guild.members.me;
-    const permissions = voiceChannel.permissionsFor(me);
-    if (!permissions || !permissions.has(PermissionFlagsBits.ViewChannel)) {
-        return { success: false, error: '❌ Não tenho permissão para visualizar este canal de voz (`Ver canal`).' };
-    }
-    if (!permissions.has(PermissionFlagsBits.Connect)) {
-        return { success: false, error: '❌ Não tenho permissão para conectar neste canal de voz (`Conectar`). Peça a um administrador para liberar essa permissão para o meu cargo.' };
-    }
-    if (!permissions.has(PermissionFlagsBits.Speak)) {
-        return { success: false, error: '❌ Não tenho permissão para falar neste canal de voz (`Falar`). Peça a um administrador para liberar essa permissão para o meu cargo.' };
-    }
-    if (voiceChannel.userLimit > 0 && voiceChannel.members.size >= voiceChannel.userLimit && !permissions.has(PermissionFlagsBits.MoveMembers)) {
-        return { success: false, error: '❌ O canal de voz está lotado.' };
-    }
-
+    if (!voiceChannel) return { success: false, error: 'Entre em um canal de voz primeiro.' };
     const guildId = voiceChannel.guild.id;
-    const existingSession = getSession(guildId);
+    const pending = starts.get(guildId);
+    if (pending) {
+        await pending.catch(() => {});
+        return connectRadio(member, textChannel, client, isHybrid);
+    }
+    const work = openRadio(voiceChannel, textChannel, client, isHybrid);
+    starts.set(guildId, work);
+    try {
+        return await work;
+    } finally {
+        if (starts.get(guildId) === work) starts.delete(guildId);
+    }
+}
 
-    const existingConn = getVoiceConnection(guildId);
+async function openRadio(voiceChannel, textChannel, client, isHybrid) {
+    const { guild } = voiceChannel;
+    const guildId = guild.id;
+    const permissions = voiceChannel.permissionsFor(guild.members.me);
+    const required = [
+        [PermissionFlagsBits.ViewChannel, 'Ver canal'],
+        [PermissionFlagsBits.Connect, 'Conectar'],
+        [PermissionFlagsBits.Speak, 'Falar']
+    ];
+    const missing = required.find(([flag]) => !permissions?.has(flag));
+    if (missing) return { success: false, error: 'Não tenho a permissão `' + missing[1] + '` neste canal.' };
 
-    if (existingSession) {
-        if (existingSession.voiceChannelId !== voiceChannel.id) {
-            return { success: false, error: '⚠️ Já estou em outro canal de voz em modo rádio neste servidor.' };
+    let connection = getVoiceConnection(guildId);
+    const current = getSession(guildId);
+    if (current && !current._leaving) {
+        if (current.voiceChannelId !== voiceChannel.id) {
+            return { success: false, error: 'Já existe uma sessão de rádio em outro canal de voz.' };
         }
-
-        if (existingSession.isHybrid) {
-            existingSession.isHybrid = false;
-            existingSession.voiceMode = 'DIRECT';
-            existingSession.voiceListening = true;
-            updateSession(guildId, { isHybrid: false, voiceMode: 'DIRECT', voiceListening: true });
+        if (connection?.state.status === VoiceConnectionStatus.Ready) {
+            if (current.isHybrid !== isHybrid) setSessionHybridMode(guildId, isHybrid);
+            const panel = await updateEmbed(guildId, textChannel, client, { move: true });
+            return panel ? { success: true } : { success: false, error: 'Não consegui publicar o painel neste canal.' };
         }
-
-        const { embeds, components } = buildRadioEmbed(existingSession);
-        const msg = await textChannel.send({ embeds, components });
-
-        if (existingSession.embedMessageId) {
-            try {
-                const oldMsg = await textChannel.messages.fetch(existingSession.embedMessageId);
-                await oldMsg.delete().catch(() => {});
-            } catch (_) {}
-        }
-
-        updateSession(guildId, { embedMessageId: msg.id, textChannelId: textChannel.id });
-        return { success: true };
+        await closeSession(current, textChannel, client);
     }
 
-    if (existingConn) {
-        try { existingConn.destroy(); } catch (_) {}
+    const alreadyConnected = connection?.state.status === VoiceConnectionStatus.Ready &&
+        connection.joinConfig.channelId === voiceChannel.id;
+    if (!alreadyConnected && voiceChannel.userLimit > 0 && voiceChannel.members.size >= voiceChannel.userLimit &&
+        !permissions.has(PermissionFlagsBits.MoveMembers)) {
+        return { success: false, error: 'O canal de voz está lotado.' };
     }
-
-    const connection = joinVoiceChannel({
-        channelId: voiceChannel.id,
-        guildId,
-        adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-        selfDeaf: false,
-        selfMute: false
-    });
-
+    if (!isHybrid || !alreadyConnected) {
+        if (connection && connection.state.status !== VoiceConnectionStatus.Destroyed) connection.destroy();
+        connection = joinVoiceChannel({
+            channelId: voiceChannel.id, guildId, adapterCreator: guild.voiceAdapterCreator,
+            selfDeaf: false, selfMute: false
+        });
+    }
     try {
         await entersState(connection, VoiceConnectionStatus.Ready, 15000);
-    } catch (err) {
-        try { connection.destroy(); } catch (_) {}
-        return { success: false, error: '❌ Não foi possível conectar ao canal de voz (tempo limite esgotado ou desconectado).' };
+    } catch (_) {
+        if (connection.state.status !== VoiceConnectionStatus.Destroyed) connection.destroy();
+        return { success: false, error: 'A conexão ao canal de voz falhou ou excedeu o tempo limite.' };
     }
 
-    const { isToolDisabled } = require('../handlers/llmHandler');
-    const session = createSession(guildId, voiceChannel.id, textChannel.id, false);
-    if (isToolDisabled(guildId, 'radio_voice_stt')) {
-        updateSession(guildId, { voiceListening: false, voiceMode: 'OFF' });
+    const session = createSession(guildId, voiceChannel.id, textChannel.id, isHybrid);
+    session.voiceDisabled = require('../handlers/llmHandler').isToolDisabled(guildId, 'radio_voice_stt');
+    session.closeReceiver = setupRadioVoiceReceiver(connection, guildId, textChannel, client, voiceChannel);
+    const disconnected = () => {
+        if (sessionMatches(session)) void closeSession(session, textChannel, client, connection);
+    };
+    connection.once(VoiceConnectionStatus.Disconnected, disconnected);
+    connection.once(VoiceConnectionStatus.Destroyed, disconnected);
+    session.detachConnection = () => {
+        connection.off(VoiceConnectionStatus.Disconnected, disconnected);
+        connection.off(VoiceConnectionStatus.Destroyed, disconnected);
+    };
+    session.emptyTimer = setInterval(() => {
+        if (sessionMatches(session) && !voiceChannel.members.some(member => !member.user.bot)) disconnected();
+    }, 10000).unref();
+
+    const panel = await updateEmbed(guildId, textChannel, client);
+    if (!panel) {
+        await closeSession(session, textChannel, client, connection);
+        return { success: false, error: 'Não consegui publicar o painel neste canal.' };
     }
-    const { embeds, components } = buildRadioEmbed(session);
-    const msg = await textChannel.send({ embeds, components });
-    updateSession(guildId, { embedMessageId: msg.id });
-
-    connection.on(VoiceConnectionStatus.Disconnected, async () => {
-        const s = getSession(guildId);
-        if (s && !s._leaving) {
-            stopPlayer(guildId);
-            if (s.embedMessageId && textChannel) {
-                try {
-                    const embedMsg = await textChannel.messages.fetch(s.embedMessageId);
-                    await embedMsg?.delete?.().catch(() => {});
-                } catch (_) {}
-            }
-            cleanupSessionAudioFiles(s);
-            destroySession(guildId);
-        }
-    });
-
-    setupRadioVoiceReceiver(connection, guildId, textChannel, client, voiceChannel);
-
-    connection.on(VoiceConnectionStatus.Ready, () => {
-        monitorEmptyChannel(guildId, voiceChannel, textChannel);
-    });
-    monitorEmptyChannel(guildId, voiceChannel, textChannel);
-
     return { success: true };
 }
 
-async function startHybridMode(member, textChannel, client) {
-    const voiceChannel = member?.voice?.channel;
-    if (!voiceChannel) return { success: false, error: '⚠️ Você precisa estar em um canal de voz para ativar o Modo Híbrido.' };
+function startRadioMode(member, textChannel, client) {
+    return connectRadio(member, textChannel, client, false);
+}
 
-    const me = voiceChannel.guild.members.me;
-    const permissions = voiceChannel.permissionsFor(me);
-    if (!permissions || !permissions.has(PermissionFlagsBits.ViewChannel)) {
-        return { success: false, error: '❌ Não tenho permissão para visualizar este canal de voz (`Ver canal`).' };
-    }
-    if (!permissions.has(PermissionFlagsBits.Connect)) {
-        return { success: false, error: '❌ Não tenho permissão para conectar neste canal de voz (`Conectar`). Peça a um administrador para liberar essa permissão para o meu cargo.' };
-    }
-    if (!permissions.has(PermissionFlagsBits.Speak)) {
-        return { success: false, error: '❌ Não tenho permissão para falar neste canal de voz (`Falar`). Peça a um administrador para liberar essa permissão para o meu cargo.' };
-    }
-    if (voiceChannel.userLimit > 0 && voiceChannel.members.size >= voiceChannel.userLimit && !permissions.has(PermissionFlagsBits.MoveMembers)) {
-        return { success: false, error: '❌ O canal de voz está lotado.' };
-    }
+function startHybridMode(member, textChannel, client) {
+    return connectRadio(member, textChannel, client, true);
+}
 
-    const guildId = voiceChannel.guild.id;
-    const existingSession = getSession(guildId);
-    const existingConn = getVoiceConnection(guildId);
-
-    if (existingSession) {
-        if (existingSession.voiceChannelId !== voiceChannel.id) {
-            return { success: false, error: '⚠️ Já estou em outro canal de voz neste servidor.' };
-        }
-
-        existingSession.isHybrid = true;
-        if (existingSession.voiceMode === 'DIRECT' || existingSession.voiceMode === 'IA' || !existingSession.voiceMode) {
-            existingSession.voiceMode = 'HYBRID';
-        }
-        existingSession.voiceListening = existingSession.voiceMode !== 'OFF';
-        updateSession(guildId, { isHybrid: true, voiceMode: existingSession.voiceMode, voiceListening: existingSession.voiceListening });
-
-        if (existingSession.embedMessageId) {
-            try {
-                const oldMsg = await textChannel.messages.fetch(existingSession.embedMessageId);
-                await oldMsg.delete().catch(() => {});
-            } catch (_) {}
-        }
-
-        const { embeds, components } = buildRadioEmbed(existingSession);
-        const msg = await textChannel.send({ embeds, components });
-        updateSession(guildId, { embedMessageId: msg.id, textChannelId: textChannel.id });
-        return { success: true, message: '🎙️📻 Modo Híbrido ativado! Playlist e rádio mantidos tocando.' };
-    }
-
-    let connection = existingConn;
-    if (connection && connection.state.status === VoiceConnectionStatus.Ready && voiceChannel.guild.members.me?.voice?.channelId === voiceChannel.id) {
-        const { isToolDisabled } = require('../handlers/llmHandler');
-        const session = createSession(guildId, voiceChannel.id, textChannel.id, true);
-        if (isToolDisabled(guildId, 'radio_voice_stt')) {
-            updateSession(guildId, { voiceListening: false, voiceMode: 'OFF' });
-        }
-        const { embeds, components } = buildRadioEmbed(session);
-        const msg = await textChannel.send({ embeds, components });
-        updateSession(guildId, { embedMessageId: msg.id });
-
-        connection.on(VoiceConnectionStatus.Disconnected, async () => {
-            const s = getSession(guildId);
-            if (s && !s._leaving) {
-                stopPlayer(guildId);
-                if (s.embedMessageId && textChannel) {
-                    try {
-                        const embedMsg = await textChannel.messages.fetch(s.embedMessageId);
-                        await embedMsg?.delete?.().catch(() => {});
-                    } catch (_) {}
-                }
-                cleanupSessionAudioFiles(s);
-                destroySession(guildId);
-            }
-        });
-
-        setupRadioVoiceReceiver(connection, guildId, textChannel, client, voiceChannel);
-        monitorEmptyChannel(guildId, voiceChannel, textChannel);
-        return { success: true, message: '🎙️📻 Modo Híbrido ativado!' };
-    }
-
-    if (connection) {
-        try { connection.destroy(); } catch (_) {}
-    }
-
-    connection = joinVoiceChannel({
-        channelId: voiceChannel.id,
-        guildId,
-        adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-        selfDeaf: false,
-        selfMute: false
-    });
-
-    try {
-        await entersState(connection, VoiceConnectionStatus.Ready, 15000);
-    } catch (err) {
-        try { connection.destroy(); } catch (_) {}
-        return { success: false, error: '❌ Não foi possível conectar ao canal de voz (tempo limite esgotado ou desconectado).' };
-    }
-
-    const { isToolDisabled } = require('../handlers/llmHandler');
-    const session = createSession(guildId, voiceChannel.id, textChannel.id, true);
-    if (isToolDisabled(guildId, 'radio_voice_stt')) {
-        updateSession(guildId, { voiceListening: false, voiceMode: 'OFF' });
-    }
-    const { embeds, components } = buildRadioEmbed(session);
-    const msg = await textChannel.send({ embeds, components });
-    updateSession(guildId, { embedMessageId: msg.id });
-
-    connection.on(VoiceConnectionStatus.Disconnected, async () => {
-        const s = getSession(guildId);
-        if (s && !s._leaving) {
-            stopPlayer(guildId);
-            if (s.embedMessageId && textChannel) {
-                try {
-                    const embedMsg = await textChannel.messages.fetch(s.embedMessageId);
-                    await embedMsg?.delete?.().catch(() => {});
-                } catch (_) {}
-            }
-            cleanupSessionAudioFiles(s);
-            destroySession(guildId);
-        }
-    });
-
-    setupRadioVoiceReceiver(connection, guildId, textChannel, client, voiceChannel);
-    monitorEmptyChannel(guildId, voiceChannel, textChannel);
-
-    return { success: true, message: '🎙️📻 Modo Híbrido ativado!' };
+async function setupCooldown(session, textChannel, client) {
+    if (session.voiceCooldownUntil > Date.now()) return;
+    session.voiceCooldownUntil = Date.now() + voiceCooldownMs;
+    clearTimeout(session.cooldownTimer);
+    session.cooldownTimer = setTimeout(() => {
+        if (!sessionMatches(session)) return;
+        session.voiceCooldownUntil = 0;
+        void updateEmbed(session.guildId, textChannel, client);
+    }, voiceCooldownMs).unref();
+    await updateEmbed(session.guildId, textChannel, client);
 }
 
 function setupRadioVoiceReceiver(connection, guildId, textChannel, client, voiceChannel) {
-    const activeStreams = new Set();
     const receiver = connection.receiver;
+    const captures = new Map();
+    const recentCommands = new Map();
 
-    receiver.speaking.on('start', (userId) => {
+    function onSpeaking(userId) {
+        const session = getSession(guildId);
         const { isToolDisabled } = require('../handlers/llmHandler');
-        if (isToolDisabled(guildId, 'radio_voice_stt')) return;
+        const enabled = () => session && sessionMatches(session) && session.voiceMode !== 'OFF' &&
+            session.voiceCooldownUntil <= Date.now() && !isToolDisabled(guildId, 'radio_voice_stt') &&
+            !checkBan(userId, guildId, session.textChannelId) && !checkBan(userId, guildId, session.voiceChannelId);
+        if (!enabled() || captures.has(userId)) return;
+        const member = voiceChannel.members.get(userId);
+        if (!member || member.user.bot || member.voice.selfMute || member.voice.serverMute) return;
 
-        const session = getSession(guildId);
-        const currentVoiceMode = session?.voiceMode || (session?.voiceListening ? (session?.isHybrid ? 'HYBRID' : 'IA') : 'OFF');
-        if (!session || currentVoiceMode === 'OFF') return;
-
-        const streamKey = `${guildId}_${userId}`;
-        if (activeStreams.has(streamKey)) return;
-        activeStreams.add(streamKey);
-
-        const member = voiceChannel.members?.get(userId);
-        if (member && (member.voice.selfMute || member.voice.serverMute)) {
-            activeStreams.delete(streamKey);
-            return;
-        }
-
-        const opusStream = receiver.subscribe(userId, {
-            end: { behavior: EndBehaviorType.AfterSilence, duration: 1200 }
-        });
-
+        const opus = receiver.subscribe(userId, { end: { behavior: EndBehaviorType.AfterSilence, duration: 1200 } });
         const decoder = new prism.opus.Decoder({ frameSize: 960, channels: 2, rate: 48000 });
-        const pcmChunks = [];
-
-        opusStream.pipe(decoder);
-        decoder.on('data', chunk => pcmChunks.push(chunk));
-
-        decoder.on('end', async () => {
-            activeStreams.delete(streamKey);
-            const { isBotPaused } = require('../handlers/ownerCommandHandler');
-            if (isBotPaused()) return;
-            const pcmBuffer = Buffer.concat(pcmChunks);
-            if (pcmBuffer.length < 9600) return;
-
-            const rms = calculatePcmRms(pcmBuffer);
-            if (rms < 250) return;
-
-            const wavHeader = createWavHeader(pcmBuffer.length);
-            const wavBuffer = Buffer.concat([wavHeader, pcmBuffer]);
-            const result = await transcribeAudio(wavBuffer);
-            if (!result) return;
-
-            if (typeof result === 'object' && result.isRateLimit) {
-                console.warn(`[RadioVoice] ⚠️ Limite de API Whisper/Groq atingido (${result.status}). Desativando escuta por 1 minuto.`);
-                updateSession(guildId, { voiceListening: false, voiceMode: 'OFF' });
-                await updateEmbed(guildId, textChannel, client);
-
-                if (textChannel) {
-                    try {
-                        const msg = await textChannel.send('⚠️ **Limite de requisições da API de voz (Whisper) atingido!** A escuta por voz do Rádio foi desativada temporariamente por **1 minuto**.');
-                        setTimeout(() => { msg?.delete?.().catch(() => {}); }, 15000);
-                    } catch (_) {}
+        const chunks = [];
+        let bytes = 0;
+        const cleanup = () => {
+            if (captures.get(userId) === cleanup) captures.delete(userId);
+            opus.destroy();
+            decoder.destroy();
+        };
+        captures.set(userId, cleanup);
+        opus.on('error', cleanup);
+        decoder.on('error', cleanup);
+        decoder.on('data', chunk => {
+            bytes += chunk.length;
+            if (bytes > maxCaptureBytes) cleanup();
+            else chunks.push(chunk);
+        });
+        decoder.once('end', async () => {
+            try {
+                const { isBotPaused } = require('../handlers/ownerCommandHandler');
+                if (!enabled() || isBotPaused() || bytes < 9600) return;
+                const pcm = Buffer.concat(chunks, bytes);
+                if (calculatePcmRms(pcm) < 250) return;
+                const result = await transcribeAudio(Buffer.concat([createWavHeader(bytes), pcm]));
+                if (!enabled() || !voiceChannel.members.has(userId)) return;
+                if (result?.isRateLimit) {
+                    await setupCooldown(session, textChannel, client);
+                    return;
                 }
-
-                setTimeout(async () => {
-                    const currentSession = getSession(guildId);
-                    if (currentSession) {
-                        updateSession(guildId, { voiceListening: true, voiceMode: 'DIRECT' });
-                        await updateEmbed(guildId, textChannel, client);
-                        if (textChannel) {
-                            try {
-                                const msg = await textChannel.send('✅ **Escuta de voz do Rádio reativada!** Você já pode enviar comandos por voz novamente.');
-                                setTimeout(() => { msg?.delete?.().catch(() => {}); }, 10000);
-                            } catch (_) {}
-                        }
-                    }
-                }, 60000);
-
-                return;
-            }
-
-            const text = typeof result === 'string' ? result : '';
-            if (!text) return;
-
-            const lower = text.toLowerCase();
-
-            const STT_HALLUCINATIONS = [
-                'assistente virtual',
-                'legendas pela comunidade',
-                'subtítulos',
-                'subtitulos',
-                'obrigado por assistir',
-                'inscreva-se',
-                'curta e compartilhe',
-                'transcrição',
-                'transcricao',
-                'amara.org',
-                'fale com a hikari',
-                'fale com hikari',
-                'falar com a hikari',
-                'falar com hikari',
-                'conversar com a hikari',
-                'conversar com hikari',
-                'fale com a',
-                'falar com a',
-                'fale com o',
-                'falar com o'
-            ];
-
-            if (STT_HALLUCINATIONS.some(h => lower.includes(h))) {
-                console.log(`[RadioVoice] 🔇 Alucinação de STT/ruído ignorada: "${text}"`);
-                return;
-            }
-
-            const triggerMatch = lower.match(RADIO_TRIGGER_REGEX);
-            if (!triggerMatch) return;
-
-            const matchedWord = triggerMatch[0];
-            console.log(`[RadioVoice] 🎯 Gatilho RADIO_TRIGGER_REGEX ativado por: "${matchedWord}" | Transcrição: "${text}"`);
-
-            const userKey = `${guildId}_${userId}`;
-            const now = Date.now();
-            const lastTime = userLastVoiceCommand.get(userKey) || 0;
-            if (now - lastTime < 3000) {
-                console.log(`[RadioVoice] ⏳ Comando de voz de ${userId} ignorado por debounce (menos de 3s).`);
-                return;
-            }
-
-            const matchIndex = triggerMatch.index;
-            let prompt = text.substring(matchIndex + matchedWord.length).replace(/^[,\s.!?-]+/, '').trim();
-            prompt = prompt.replace(RADIO_TRIGGER_REGEX, '').replace(/^[,\s.!?-]+/, '').trim();
-
-            if (!prompt || prompt.length < 2) {
-                console.log(`[RadioVoice] ℹ️ Prompt sem comando após gatilho ignorado: "${text}"`);
-                return;
-            }
-
-            userLastVoiceCommand.set(userKey, now);
-            const activeMode = session.voiceMode || (session.voiceListening ? (session.isHybrid ? 'HYBRID' : 'IA') : 'OFF');
-            const targetChannel = (session.textChannelId && client.channels.cache.get(session.textChannelId)) || textChannel;
-            if (activeMode === 'OFF') {
-                return;
-            } else if (activeMode === 'DIRECT' || activeMode === 'MUSIC_DIRECT') {
-                await processDirectRadioVoiceCommand(prompt, userId, guildId, targetChannel, client);
-            } else if (activeMode === 'IA' || activeMode === 'MUSIC_IA') {
-                await processRadioVoiceCommand(prompt, userId, guildId, targetChannel, client);
-            } else if (activeMode === 'CHAT_ONLY') {
-                await processChatOnlyVoiceCommand(prompt, userId, guildId, targetChannel, client);
-            } else if (activeMode === 'HYBRID') {
-                await processHybridRadioVoiceCommand(prompt, userId, guildId, targetChannel, client);
+                if (typeof result !== 'string' || ignoredTranscripts.some(text => result.toLowerCase().includes(text))) return;
+                const trigger = result.match(RADIO_TRIGGER_REGEX);
+                if (!trigger) return;
+                const prompt = result.slice(trigger.index + trigger[0].length).replace(/^[,\s.!?-]+/, '').trim();
+                const now = Date.now();
+                if (prompt.length < 2 || now - (recentCommands.get(userId) || 0) < 3000) return;
+                recentCommands.set(userId, now);
+                const channel = client?.channels?.cache?.get(session.textChannelId) || textChannel;
+                await processVoiceCommand(session, prompt, member, channel, client);
+            } catch (error) {
+                console.error('[RadioVoice] Falha ao tratar fala:', error.code || error.name);
+            } finally {
+                cleanup();
             }
         });
+        opus.pipe(decoder);
+    }
 
-        decoder.on('error', () => activeStreams.delete(streamKey));
-    });
-}
-
-async function processDirectRadioVoiceCommand(prompt, userId, guildId, textChannel, client) {
-    const { parseRadioIntent } = require('./radioIntentEngine');
-    const intent = parseRadioIntent(prompt);
-    if (!intent) return;
-
-    const session = getSession(guildId);
-    if (!session) return;
-
-    const sendNotify = async (msgText) => {
-        if (!textChannel) return;
-        try {
-            const msg = await textChannel.send(`<@${userId}> [⚡] ${msgText}`);
-            setTimeout(() => { msg?.delete?.().catch(() => {}); }, 4000);
-        } catch (_) {}
+    receiver.speaking.on('start', onSpeaking);
+    return () => {
+        receiver.speaking.off('start', onSpeaking);
+        for (const cleanup of captures.values()) cleanup();
+        recentCommands.clear();
     };
-
-    if (intent.type === 'PAUSE') {
-        if (session.status === 'PLAYING') {
-            await pausePlayer(guildId);
-            await updateEmbed(guildId, textChannel, client);
-            await sendNotify('Pausando a música.');
-        } else {
-            await sendNotify('O rádio já está pausado ou parado.');
-        }
-        return;
-    }
-
-    if (intent.type === 'RESUME') {
-        if (session.status === 'PAUSED') {
-            await resumePlayer(guildId);
-            await updateEmbed(guildId, textChannel, client);
-            await sendNotify('Retomando a música.');
-        } else if (session.status === 'STOPPED') {
-            const first = nextTrack(guildId);
-            if (first) await playTrack(guildId, first, textChannel, client);
-            await updateEmbed(guildId, textChannel, client);
-            await sendNotify('Iniciando reprodução.');
-        }
-        return;
-    }
-
-    if (intent.type === 'STOP') {
-        stopPlayer(guildId);
-        stopRadio(guildId);
-        await updateEmbed(guildId, textChannel, client);
-        await sendNotify('Parando o rádio.');
-        return;
-    }
-
-    if (intent.type === 'LEAVE') {
-        await sendNotify('Saindo do canal de voz. Até logo!');
-        await leaveRadioCall(guildId, textChannel);
-        return;
-    }
-
-    if (intent.type === 'NEXT') {
-        const next = nextTrack(guildId);
-        if (next) {
-            await playTrack(guildId, next, textChannel, client);
-            await sendNotify(`Pulando para: **${next.title}**`);
-        } else {
-            await updateEmbed(guildId, textChannel, client);
-            await sendNotify('Fim da fila do rádio.');
-        }
-        return;
-    }
-
-    if (intent.type === 'PREVIOUS') {
-        const prev = prevTrack(guildId);
-        if (prev) {
-            await playTrack(guildId, prev, textChannel, client);
-            await sendNotify(`Voltando para: **${prev.title}**`);
-        } else {
-            await updateEmbed(guildId, textChannel, client);
-            await sendNotify('Nenhuma faixa anterior.');
-        }
-        return;
-    }
-
-    if (intent.type === 'SHUFFLE') {
-        const isShuffle = toggleShuffle(guildId);
-        await updateEmbed(guildId, textChannel, client);
-        await sendNotify(isShuffle ? 'Modo aleatório ativado!' : 'Modo aleatório desativado.');
-        return;
-    }
-
-    if (intent.type === 'LOOP') {
-        const mode = setLoopMode(guildId);
-        await updateEmbed(guildId, textChannel, client);
-        await sendNotify(`Modo de repetição: **${mode}**`);
-        return;
-    }
-
-    if (intent.type === 'REMOVE') {
-        const result = removeTrackFromPlaylist(guildId, intent.position);
-        if (result) {
-            if (result.isCurrent) {
-                if (result.newCurrentTrack) {
-                    await playTrack(guildId, result.newCurrentTrack, textChannel, client);
-                } else {
-                    stopPlayer(guildId);
-                    await updateEmbed(guildId, textChannel, client);
-                }
-            } else {
-                await updateEmbed(guildId, textChannel, client);
-            }
-            await sendNotify(`Música #${intent.position} (**${result.removedTrack.title}**) removida!`);
-        } else {
-            await sendNotify(`Não foi possível remover a música na posição #${intent.position}.`);
-        }
-        return;
-    }
-
-    if (intent.type === 'INFO') {
-        if (session.currentTrack) {
-            await sendNotify(`Tocando agora: **${session.currentTrack.title}** — *${session.currentTrack.artist}*`);
-        } else {
-            await sendNotify('Nenhuma música tocando no momento.');
-        }
-        return;
-    }
-
-    if (intent.type === 'QUEUE') {
-        const { buildQueueEmbed } = require('./radioEmbed');
-        const embed = buildQueueEmbed(session);
-        if (textChannel) {
-            try {
-                const msg = await textChannel.send({ content: `<@${userId}> 📜 **Fila do Rádio:**`, embeds: [embed] });
-                setTimeout(() => { msg?.delete?.().catch(() => {}); }, 10000);
-            } catch (_) {}
-        }
-        return;
-    }
-
-    if (intent.type === 'ADD') {
-        await sendNotify(`Buscando **"${intent.query}"**...`);
-        const result = await resolveInput(intent.query, guildId);
-
-        if (!result || result.type === 'not_found') {
-            await sendNotify(`Música não encontrada para **"${intent.query}"**.`);
-            return;
-        }
-
-        let trackToAdd = null;
-
-        if (result.type === 'track') {
-            trackToAdd = { ...result.track, addedBy: userId };
-        } else if (result.type === 'ambiguous' && Array.isArray(result.results) && result.results.length > 0) {
-            trackToAdd = { ...result.results[0], addedBy: userId };
-        } else if (result.type === 'playlist' && Array.isArray(result.tracks) && result.tracks.length > 0) {
-            const firstNewPos = (session.playlist?.length || 0) + 1;
-            result.tracks.forEach(t => {
-                t.addedBy = userId;
-                addTrackToQueue(guildId, t);
-            });
-            const isPlayingOrActive = session.status === 'PLAYING' || session.status === 'BUFFERING' || session.status === 'PAUSED';
-            if (!isPlayingOrActive) {
-                skipToTrack(guildId, firstNewPos);
-                const current = getSession(guildId)?.currentTrack;
-                if (current) await playTrack(guildId, current, textChannel, client);
-            } else {
-                await updateEmbed(guildId, textChannel, client);
-                prefetchNextTrack(guildId).catch(() => {});
-            }
-            await sendNotify(`✅ **${result.tracks.length}** faixas adicionadas à fila!`);
-            return;
-        }
-
-        if (!trackToAdd) {
-            await sendNotify(`Música não encontrada para **"${intent.query}"**.`);
-            return;
-        }
-
-        const queuePos = addTrackToQueue(guildId, trackToAdd);
-        const isPlayingOrActive = session.status === 'PLAYING' || session.status === 'BUFFERING' || session.status === 'PAUSED';
-
-        if (!isPlayingOrActive) {
-            skipToTrack(guildId, queuePos);
-            const current = getSession(guildId)?.currentTrack;
-            if (current) await playTrack(guildId, current, textChannel, client);
-        } else {
-            await updateEmbed(guildId, textChannel, client);
-            prefetchNextTrack(guildId).catch(() => {});
-        }
-        await sendNotify(`Adicionada à fila: **${trackToAdd.title}** — *${trackToAdd.artist}*`);
-        return;
-    }
 }
 
-async function processRadioVoiceCommand(prompt, userId, guildId, textChannel, client) {
-    const { addToQueue } = require('../handlers/llmHandler');
-
-    const contextMessage = {
-        id: `radio_voice_${Date.now()}`,
-        isVoice: true,
-        isRadioMode: true,
-        radioGuildId: guildId,
-        radioTextChannel: textChannel,
-        radioClient: client,
-        radioUserId: userId,
-        content: prompt,
-        author: {
-            id: userId,
-            username: textChannel.guild?.members?.cache?.get(userId)?.user?.username || `user_${userId}`,
-            bot: false
-        },
-        guild: textChannel.guild,
-        guildId,
-        channel: textChannel,
-        channelId: textChannel.id,
-        mentions: { has: () => false, everyone: false },
-        reply: async (payload) => {
-            const content = typeof payload === 'string' ? payload : payload?.content || '';
-            if (content) {
-                try {
-                    const msg = await textChannel.send({ content });
-                    setTimeout(() => { msg.delete().catch(() => {}); }, 5000);
-                    return msg;
-                } catch (_) {}
-            }
-            return null;
-        }
-    };
-
-    await addToQueue(prompt, contextMessage, 'mention', {
-        radioMode: true,
-        radioMCPTools,
-        guildId
-    });
-}
-
-async function processChatOnlyVoiceCommand(prompt, userId, guildId, textChannel, client) {
-    const { addToQueue } = require('../handlers/llmHandler');
-
-    const voiceChannel = client.channels.cache.get(getSession(guildId)?.voiceChannelId);
-    const member = voiceChannel?.members?.get(userId);
-    const username = member?.user?.username || `user_${userId}`;
-    const userTag = member?.user?.tag || username;
-
-    const contextMessage = {
-        id: `voice_chat_${Date.now()}`,
-        isVoice: true,
-        content: prompt,
-        author: {
-            id: userId,
-            username: username,
-            tag: userTag,
-            bot: false
-        },
-        guild: textChannel.guild,
-        guildId,
-        channel: textChannel,
-        channelId: textChannel.id,
-        mentions: { has: () => false, everyone: false },
-        reply: async (payload) => {
-            let contentText = typeof payload === 'string' ? payload : payload?.content || '';
-            if (contentText && !contentText.includes(`<@${userId}>`)) {
-                contentText = `<@${userId}> ${contentText}`;
-            }
-            if (typeof payload === 'object' && payload !== null) {
-                return await textChannel.send({ ...payload, content: contentText });
-            }
-            return await textChannel.send({ content: contentText });
-        }
-    };
-
-    await addToQueue(prompt, contextMessage, 'mention', {
-        guildId,
-        userId
-    });
-}
-
-async function processHybridRadioVoiceCommand(prompt, userId, guildId, textChannel, client) {
-    const { parseRadioIntent } = require('./radioIntentEngine');
-    const intent = parseRadioIntent(prompt);
-
-    if (intent) {
-        const { handleRadioMCPCall } = require('./radioMCPHandler');
-        let toolName = null;
-        let toolArgs = {};
-
-        if (intent.type === 'ADD') {
-            toolName = 'radio_play_music';
-            toolArgs = { query: intent.query };
-        } else if (intent.type === 'PAUSE' || intent.type === 'RESUME') {
-            toolName = 'radio_pause_resume';
-        } else if (intent.type === 'STOP') {
-            toolName = 'radio_stop_music';
-        } else if (intent.type === 'NEXT') {
-            toolName = 'radio_next_track';
-        } else if (intent.type === 'PREVIOUS') {
-            toolName = 'radio_prev_track';
-        } else if (intent.type === 'SHUFFLE') {
-            toolName = 'radio_toggle_shuffle';
-        } else if (intent.type === 'LOOP') {
-            toolName = 'radio_set_repeat';
-        } else if (intent.type === 'QUEUE') {
-            toolName = 'radio_show_queue';
-        } else if (intent.type === 'INFO') {
-            toolName = 'radio_get_current';
-        } else if (intent.type === 'REMOVE') {
-            toolName = 'radio_remove_track';
-            toolArgs = { position: intent.position };
-        } else if (intent.type === 'LEAVE') {
-            toolName = 'radio_leave_call';
-        }
-
-        if (toolName) {
-            const mcpResult = await handleRadioMCPCall(toolName, toolArgs, userId, guildId, textChannel, client);
-            if (mcpResult) {
-                try {
-                    const replyContent = mcpResult.includes(`<@${userId}>`) ? mcpResult : `<@${userId}> ${mcpResult}`;
-                    const msg = await textChannel.send(replyContent);
-                    setTimeout(() => { msg?.delete?.().catch(() => {}); }, 5000);
-                } catch (_) {}
-            }
-            return;
-        }
-    }
-
-    const { addToQueue } = require('../handlers/llmHandler');
-    const voiceChannel = client.channels.cache.get(getSession(guildId)?.voiceChannelId);
-    const member = voiceChannel?.members?.get(userId);
-    const username = member?.user?.username || `user_${userId}`;
-    const userTag = member?.user?.tag || username;
-
-    const contextMessage = {
-        id: `hybrid_voice_${Date.now()}`,
-        isVoice: true,
-        isHybridVoice: true,
-        hybridGuildId: guildId,
-        hybridTextChannel: textChannel,
-        hybridClient: client,
-        hybridUserId: userId,
-        content: prompt,
-        author: {
-            id: userId,
-            username: username,
-            tag: userTag,
-            bot: false
-        },
-        guild: textChannel.guild,
-        guildId,
-        channel: textChannel,
-        channelId: textChannel.id,
-        mentions: { has: () => false, everyone: false },
-        reply: async (payload) => {
-            let contentText = typeof payload === 'string' ? payload : payload?.content || '';
-            if (contentText && !contentText.includes(`<@${userId}>`)) {
-                contentText = `<@${userId}> ${contentText}`;
-            }
-            if (typeof payload === 'object' && payload !== null) {
-                return await textChannel.send({ ...payload, content: contentText });
-            }
-            return await textChannel.send({ content: contentText });
-        }
-    };
-
-    await addToQueue(prompt, contextMessage, 'mention', {
-        hybridMode: true,
-        isHybridVoice: true,
-        radioMCPTools,
-        guildId,
-        userId
-    });
-}
-
-async function leaveRadioCall(guildId, textChannel) {
-    if (emptyChannelIntervals.has(guildId)) {
-        clearInterval(emptyChannelIntervals.get(guildId));
-        emptyChannelIntervals.delete(guildId);
-    }
-
-    const session = getSession(guildId);
-    if (session) {
-        updateSession(guildId, { _leaving: true });
-        if (session.embedMessageId && textChannel) {
-            try {
-                const embedMsg = await textChannel.messages.fetch(session.embedMessageId);
-                await embedMsg?.delete?.().catch(() => {});
-            } catch (_) {}
-        }
-    }
-
-    stopPlayer(guildId);
-
-    const conn = getVoiceConnection(guildId);
-    if (conn) {
-        try { conn.destroy(); } catch (_) {}
-    }
-
-    if (session) {
-        cleanupSessionAudioFiles(session);
-    }
-    destroySession(guildId);
-
-    if (textChannel) {
-        try {
-            const msg = await textChannel.send('👋 Modo Rádio encerrado. Até logo!');
-            setTimeout(() => { msg?.delete?.().catch(() => {}); }, 5000);
-        } catch (_) {}
-    }
-}
-
-function monitorEmptyChannel(guildId, voiceChannel, textChannel) {
-    if (emptyChannelIntervals.has(guildId)) {
-        clearInterval(emptyChannelIntervals.get(guildId));
-        emptyChannelIntervals.delete(guildId);
-    }
-
-    const CHECK_INTERVAL = 10000;
-    const interval = setInterval(() => {
-        const session = getSession(guildId);
-        if (!session) {
-            clearInterval(interval);
-            emptyChannelIntervals.delete(guildId);
-            return;
-        }
-        const humanMembers = voiceChannel.members?.filter(m => !m.user.bot) || new Map();
-        if (humanMembers.size === 0) {
-            clearInterval(interval);
-            emptyChannelIntervals.delete(guildId);
-            leaveRadioCall(guildId, textChannel);
-        }
-    }, CHECK_INTERVAL);
-
-    emptyChannelIntervals.set(guildId, interval);
-}
-
-function scheduleAmbiguousAutoSelect(pendingKey, messageTarget) {
-    const timer = setTimeout(async () => {
-        const pending = radioAmbiguousSessions.get(pendingKey);
-        if (!pending) return;
-
-        radioAmbiguousSessions.delete(pendingKey);
-
-        const firstTrack = { ...pending.results[0], addedBy: pending.userId };
-
-        try {
-            if (messageTarget && typeof messageTarget.edit === 'function') {
-                await messageTarget.edit({
-                    content: `⏱️ **Tempo esgotado (10s).** Selecionada automaticamente a 1ª opção: **${firstTrack.title}**`,
-                    embeds: [],
-                    components: []
-                });
-                setTimeout(() => { messageTarget.delete().catch(() => {}); }, 5000);
-            } else if (messageTarget && typeof messageTarget.editReply === 'function') {
-                await messageTarget.editReply({
-                    content: `⏱️ **Tempo esgotado (10s).** Selecionada automaticamente a 1ª opção: **${firstTrack.title}**`,
-                    embeds: [],
-                    components: []
-                });
-                setTimeout(() => { messageTarget.deleteReply().catch(() => {}); }, 5000);
-            }
-        } catch (_) {}
-
-        const session = getSession(pending.guildId);
-        addTrackToQueue(pending.guildId, firstTrack);
-
-        if (!session || session.status === 'STOPPED') {
-            const first = nextTrack(pending.guildId);
-            if (first) await playTrack(pending.guildId, first, pending.textChannel, pending.client);
-        } else {
-            await updateEmbed(pending.guildId, pending.textChannel, pending.client);
-        }
-    }, 10000);
-
-    const pendingObj = radioAmbiguousSessions.get(pendingKey);
-    if (pendingObj) {
-        pendingObj.timer = timer;
-    }
-}
-
-module.exports = {
-    startRadioMode,
-    startHybridMode,
-    leaveRadioCall,
-    setupRadioVoiceReceiver,
-    radioAmbiguousSessions,
-    scheduleAmbiguousAutoSelect
+const directTools = {
+    STOP: 'radio_stop_music', LEAVE: 'radio_leave_call', NEXT: 'radio_next_track',
+    PREVIOUS: 'radio_prev_track', SHUFFLE: 'radio_toggle_shuffle', LOOP: 'radio_set_repeat',
+    QUEUE: 'radio_show_queue', INFO: 'radio_get_current', REMOVE: 'radio_remove_track',
+    ADD: 'radio_play_music', PAUSE: 'radio_pause_resume', RESUME: 'radio_pause_resume'
 };
+
+async function processVoiceCommand(session, prompt, member, channel, client) {
+    const { guildId, voiceMode } = session;
+    const { id: userId, username, tag } = member.user;
+    if (voiceMode === 'DIRECT' || voiceMode === 'MUSIC_DIRECT') {
+        const intent = parseRadioIntent(prompt);
+        if (!intent) return;
+        const { type, ...args } = intent;
+        if (type === 'PAUSE' || type === 'RESUME') args.action = type.toLowerCase();
+        const { handleRadioMCPCall } = require('./radioMCPHandler');
+        const result = await handleRadioMCPCall(directTools[type], args, userId, guildId, channel, client, session.id);
+        if (result && sessionMatches(session)) await channel.send({ content: result, allowedMentions: { parse: [] } });
+        return;
+    }
+
+    const radioMode = voiceMode === 'IA' || voiceMode === 'MUSIC_IA';
+    const hybridMode = voiceMode === 'HYBRID';
+    const { addToQueue } = require('../handlers/llmHandler');
+    const context = {
+        id: 'radio_voice_' + randomUUID(), isVoice: true, content: prompt,
+        isRadioMode: radioMode, radioGuildId: guildId, radioTextChannel: channel,
+        radioClient: client, radioUserId: userId, radioSessionId: session.id,
+        isHybridVoice: hybridMode, hybridGuildId: guildId, hybridTextChannel: channel,
+        hybridClient: client, hybridUserId: userId,
+        author: { id: userId, username, tag, bot: false },
+        guild: channel.guild, guildId, channel, channelId: channel.id,
+        mentions: { has: () => false, everyone: false },
+        reply: async payload => {
+            if (!sessionMatches(session)) return null;
+            return channel.send(typeof payload === 'string' ? { content: payload } : payload);
+        }
+    };
+    await addToQueue(prompt, context, 'mention', {
+        radioMode, hybridMode, isHybridVoice: hybridMode,
+        radioMCPTools: radioMode || hybridMode ? radioMCPTools : undefined, guildId, userId
+    });
+}
+
+async function closeSession(session, textChannel, client, connection = getVoiceConnection(session.guildId)) {
+    if (!sessionMatches(session)) return;
+    session._leaving = true;
+    clearInterval(session.emptyTimer);
+    clearTimeout(session.cooldownTimer);
+    session.detachConnection?.();
+    session.closeReceiver?.();
+    stopPlayer(session.guildId);
+    cancelSearches(session);
+    if (connection && connection.state.status !== VoiceConnectionStatus.Destroyed) connection.destroy();
+    cleanupSessionAudioFiles(session);
+    destroySession(session.guildId);
+    await deletePanel(session, textChannel, client);
+}
+
+async function leaveRadioCall(guildId, textChannel, client) {
+    const session = getSession(guildId);
+    if (!session) return false;
+    await closeSession(session, textChannel, client);
+    return true;
+}
+
+module.exports = { startRadioMode, startHybridMode, leaveRadioCall, setupRadioVoiceReceiver };
