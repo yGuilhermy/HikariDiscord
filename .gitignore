@@ -77,4 +77,7 @@ voices/
 voice/
 scratch_voice*
 src/community/
-tests/
+/tests/*
+!/tests/multi-mcp.test.js
+
+!/tests/mcp-price.test.js

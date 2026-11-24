@@ -158,7 +158,7 @@ function normalizeCurrency(raw) {
 }
 
 function parseAmount(val) {
-    if (typeof val === 'number') return !isNaN(val) && val > 0 ? val : 1;
+    if (typeof val === 'number') return Number.isFinite(val) && val >= 0 ? val : 1;
     if (!val) return 1;
     let s = String(val).trim();
     s = s.replace(/^[^\d.,]+/, '').replace(/[^\d.,]+$/, '');
@@ -172,7 +172,7 @@ function parseAmount(val) {
         s = s.replace(',', '.');
     }
     const num = parseFloat(s);
-    return !isNaN(num) && num > 0 ? num : 1;
+    return Number.isFinite(num) && num >= 0 ? num : 1;
 }
 
 function formatCurrencyNumber(val) {

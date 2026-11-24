@@ -36,6 +36,10 @@ async function getSteamGameInfo(query) {
             name: data.name,
             appId: appId,
             price: price,
+            priceMinorUnits: Number.isSafeInteger(data.price_overview?.final) && data.price_overview.final >= 0
+                ? data.price_overview.final : null,
+            priceCurrency: data.price_overview?.currency || null,
+            isFree: data.is_free === true,
             originalPrice: originalPrice,
             discount: discount,
             description: desc,
