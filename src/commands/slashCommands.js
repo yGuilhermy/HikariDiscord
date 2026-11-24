@@ -23,6 +23,12 @@ const setGlobalContext = (builder) => {
 const commands = [
     setGlobalContext(
         new SlashCommandBuilder()
+            .setName('memoria')
+            .setDescription('Consulte e gerencie as anotações da Hikari em um painel privado.')
+            .addStringOption(option => option.setName('busca').setDescription('Chave ou trecho da anotação').setMaxLength(120))
+    ),
+    setGlobalContext(
+        new SlashCommandBuilder()
             .setName('ia_chat')
             .setDescription('[User] Faça uma pergunta ou pedido à IA.')
             .addStringOption(option =>

@@ -121,6 +121,10 @@ module.exports = {
                     return;
                 }
             }
+            if (interaction.customId.startsWith('mem:')) {
+                const { handleMemoryInteraction } = require('../handlers/memoryPanelHandler');
+                return await handleMemoryInteraction(interaction);
+            }
             if (interaction.customId.startsWith('srvcfg_')) {
                 return await handleServerAdminInteraction(interaction);
             }
@@ -513,7 +517,10 @@ module.exports = {
             return;
         }
         const { commandName } = interaction;
-        if (commandName === 'ia_chat') {
+        if (commandName === 'memoria') {
+            const { handleMemoryInteraction } = require('../handlers/memoryPanelHandler');
+            return await handleMemoryInteraction(interaction);
+        } else if (commandName === 'ia_chat') {
             const prompt = interaction.options.getString('prompt');
             const visibility = interaction.options.getString('visibilidade');
             const voice = interaction.options.getBoolean('voice');
@@ -521,6 +528,7 @@ module.exports = {
             await addToQueue(prompt, interaction, 'slash', {
                 allowSearch: false,
                 public: isPublic,
+                memoryRequest: prompt,
                 guildId: interaction.guildId,
                 voice: typeof voice === 'boolean' ? voice : undefined,
                 forceVoice: voice === true

@@ -1,596 +1,418 @@
-const path = require('path');
-const fs = require('fs');
+const path = require('node:path');
+const fs = require('node:fs');
+const { createHash, randomUUID } = require('node:crypto');
 const config = require('../config');
 
 let dbPath = path.join(__dirname, '../data/ai_database.json');
-function setDatabasePath(customPath) {
-    dbPath = customPath;
-    loadDatabase();
-}
-function getDatabasePath() {
-    return dbPath;
-}
+const settings = { aiDbRead: true, aiDbWrite: true, aiDbEdit: true, aiDbDelete: true };
+const officialKeys = new Set(['creator_info', 'hikari_info']);
+const bulkKeys = new Set(['*', 'all', 'todos', 'tudo', 'todas', 'dump', 'banco', 'banco de dados', 'database', 'geral', 'global', 'completo', 'full']);
+const metadata = new Set(['protected', 'important', 'salvo_por', 'savedById', 'savedByTag', 'updatedAt', 'recordId', 'subjectUserId']);
 
-let database = {};
+const archiveKey = '@memory_archive';
+const retentionMs = 7 * 24 * 60 * 60 * 1000;
+const maxRevisions = 5;
 
-let runtimeSettings = {
-    aiDbRead: true,
-    aiDbWrite: true,
-    aiDbEdit: true,
-    aiDbDelete: true
-};
+function setDatabasePath(customPath) { dbPath = customPath; }
+function getDatabasePath() { return dbPath; }
 
 function loadDatabase() {
     try {
-        if (fs.existsSync(dbPath)) {
-            const raw = fs.readFileSync(dbPath, 'utf8');
-            database = JSON.parse(raw);
-        } else {
-            if (!database || typeof database !== 'object') {
-                database = {};
-            }
-            saveDatabase();
-        }
-    } catch (e) {
-        console.warn(`[databaseHandler] Falha ao carregar banco de dados de ${dbPath}:`, e.message || e);
-        if (!database || typeof database !== 'object') {
-            database = {};
-        }
+        const data = JSON.parse(fs.readFileSync(dbPath, 'utf8').replace(/^\uFEFF/, ''));
+        if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Formato de memória inválido.');
+        return data;
+    } catch (error) {
+        if (error.code === 'ENOENT') return Object.create(null);
+        console.warn('[databaseHandler] Não foi possível carregar a memória:', error.message);
+        return null;
     }
 }
 
-function saveDatabase() {
+function saveDatabase(data) {
+    pruneArchive(data);
+    const temporary = path.join(path.dirname(dbPath), '.' + path.basename(dbPath) + '.' + randomUUID() + '.tmp');
+    let fd;
     try {
-        const tmpPath = `${dbPath}.tmp`;
-        fs.writeFileSync(tmpPath, JSON.stringify(database, null, 2), 'utf8');
-        fs.renameSync(tmpPath, dbPath);
+        fd = fs.openSync(temporary, 'wx', 0o600);
+        fs.writeFileSync(fd, JSON.stringify(data, null, 2), 'utf8');
+        fs.fsyncSync(fd);
+        fs.closeSync(fd);
+        fd = undefined;
+        fs.renameSync(temporary, dbPath);
         return true;
-    } catch (e) {
-        try {
-            fs.writeFileSync(dbPath, JSON.stringify(database, null, 2), 'utf8');
-            try { fs.unlinkSync(`${dbPath}.tmp`); } catch (_) {}
-            return true;
-        } catch (fallbackErr) {
-            console.warn(`[databaseHandler] Falha ao salvar banco de dados em ${dbPath}:`, fallbackErr.message || fallbackErr);
-            return false;
-        }
+    } catch (error) {
+        if (fd !== undefined) try { fs.closeSync(fd); } catch {}
+        try { fs.unlinkSync(temporary); } catch {}
+        console.warn('[databaseHandler] Não foi possível gravar a memória:', error.message);
+        return false;
     }
 }
 
 function getDbSettings() {
-    return {
-        aiDbRead: runtimeSettings.aiDbRead && (config.aiDbReadEnabled !== false),
-        aiDbWrite: runtimeSettings.aiDbWrite && (config.aiDbWriteEnabled !== false),
-        aiDbEdit: runtimeSettings.aiDbEdit && (config.aiDbEditEnabled !== false),
-        aiDbDelete: runtimeSettings.aiDbDelete && (config.aiDbDeleteEnabled !== false)
-    };
+    return Object.fromEntries(Object.entries(settings).map(([key, value]) => [key, value && config[key + 'Enabled'] !== false]));
 }
 
 function updateDbSetting(key, value) {
-    if (runtimeSettings[key] !== undefined) {
-        runtimeSettings[key] = Boolean(value);
-        return true;
-    }
-    return false;
-}
-
-function canRead(guildId = null) {
-    const settings = getDbSettings();
-    if (!settings.aiDbRead) return false;
-    if (guildId) {
-        try {
-            const { isToolDisabled } = require('./llmHandler');
-            if (typeof isToolDisabled === 'function' && isToolDisabled(guildId, 'db_read')) {
-                return false;
-            }
-        } catch (_) {}
-    }
+    if (!Object.hasOwn(settings, key)) return false;
+    settings[key] = Boolean(value);
     return true;
 }
 
-function canWrite(guildId = null) {
-    if (!canRead(guildId)) return false;
-    const settings = getDbSettings();
-    if (!settings.aiDbWrite) return false;
-    if (guildId) {
-        try {
-            const { isToolDisabled } = require('./llmHandler');
-            if (typeof isToolDisabled === 'function' && isToolDisabled(guildId, 'db_write')) {
-                return false;
-            }
-        } catch (_) {}
+function permitted(guildId, operation) {
+    const flag = 'aiDb' + operation[0].toUpperCase() + operation.slice(1);
+    if (!getDbSettings()[flag]) return false;
+    if (!guildId) return true;
+    try {
+        const { isToolDisabled } = require('./llmHandler');
+        return typeof isToolDisabled === 'function' && !isToolDisabled(guildId, 'db_' + operation);
+    } catch {
+        return false;
     }
-    return true;
 }
+const canRead = guildId => permitted(guildId, 'read');
+const canWrite = guildId => canRead(guildId) && permitted(guildId, 'write');
+const canEdit = guildId => canRead(guildId) && permitted(guildId, 'edit');
+const canDelete = guildId => canRead(guildId) && permitted(guildId, 'delete');
 
-function canEdit(guildId = null) {
-    if (!canRead(guildId)) return false;
-    const settings = getDbSettings();
-    if (!settings.aiDbEdit) return false;
-    if (guildId) {
-        try {
-            const { isToolDisabled } = require('./llmHandler');
-            if (typeof isToolDisabled === 'function' && isToolDisabled(guildId, 'db_edit')) {
-                return false;
-            }
-        } catch (_) {}
-    }
-    return true;
-}
-
-function canDelete(guildId = null) {
-    if (!canRead(guildId)) return false;
-    const settings = getDbSettings();
-    if (!settings.aiDbDelete) return false;
-    if (guildId) {
-        try {
-            const { isToolDisabled } = require('./llmHandler');
-            if (typeof isToolDisabled === 'function' && isToolDisabled(guildId, 'db_delete')) {
-                return false;
-            }
-        } catch (_) {}
-    }
-    return true;
-}
-
-const BULK_KEYWORDS = new Set(['*', 'all', 'todos', 'tudo', 'todas', 'dump', 'banco', 'banco de dados', 'database', 'geral', 'global', 'completo', 'full']);
-
+function normalize(key) { return typeof key === 'string' ? key.trim().toLowerCase() : ''; }
+function fold(value) { return value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase(); }
 function isForbiddenKey(key) {
-    if (!key || typeof key !== 'string') return true;
-    const clean = key.trim().toLowerCase();
-    return clean === '__proto__' || clean === 'constructor' || clean === 'prototype';
+    const clean = normalize(key);
+    return !clean || clean.length > 120 || /^@|[\x00-\x1f\x7f]/.test(clean) || ['__proto__', 'constructor', 'prototype'].includes(clean);
+}
+function isBulkQuery(key) { return bulkKeys.has(normalize(key)); }
+function failure(error, message) { return { success: false, error, message }; }
+function unavailable() { return failure('storage_unavailable', 'A memória está indisponível. Nenhuma alteração foi confirmada.'); }
+function context(value) { return typeof value === 'boolean' ? { isOwner: value } : value || {}; }
+function prefix(guildId, actor) {
+    if (guildId) return '@guild:' + guildId + ':';
+    if (actor.userId) return '@dm:' + actor.userId + ':';
+    return '';
 }
 
-function isBulkQuery(key) {
-    const cleanKey = String(key || '').trim().toLowerCase();
-    if (!cleanKey) return true;
-    return BULK_KEYWORDS.has(cleanKey);
+function owns(entry, actor) {
+    const originalId = entry?.savedById || (typeof entry?.salvo_por === 'string' && entry.salvo_por.match(/ - (\d+)$/)?.[1]);
+    return Boolean(originalId && actor.userId && String(originalId) === String(actor.userId));
 }
 
-function findMatchingKeys(key) {
-    const cleanKey = String(key || '').trim().toLowerCase();
-    if (!cleanKey || isForbiddenKey(cleanKey)) return [];
-    const keys = Object.keys(database).filter(k => !isForbiddenKey(k));
-    const matched = new Set();
-
-    if (Object.prototype.hasOwnProperty.call(database, cleanKey)) {
-        matched.add(cleanKey);
+function visibleEntries(data, guildId, actor) {
+    const scope = prefix(guildId, actor);
+    const entries = new Map();
+    for (const [storageKey, entry] of Object.entries(data)) {
+        const scoped = scope && storageKey.startsWith(scope);
+        const legacy = !storageKey.startsWith('@');
+        const official = legacy && officialKeys.has(normalize(storageKey)) && entry?.protected === true;
+        const accessibleLegacy = legacy && !guildId && (actor.isOwner || owns(entry, actor));
+        if (!scoped && !official && !accessibleLegacy) continue;
+        const key = scoped ? storageKey.slice(scope.length) : storageKey;
+        if (isForbiddenKey(key)) continue;
+        const normalized = normalize(key);
+        // Anotação do escopo atual tem prioridade sobre uma versão legada.
+        if (!entries.has(normalized) || scoped) entries.set(normalized, { key, storageKey, entry });
     }
-    for (const k of keys) {
-        const lower = k.toLowerCase();
-        if (lower === cleanKey) {
-            matched.add(k);
-        }
-    }
-    for (const k of keys) {
-        const lower = k.toLowerCase();
-        if (lower.startsWith(`${cleanKey}_`) || lower.startsWith(`${cleanKey}-`) || lower.startsWith(`${cleanKey} `) || lower.includes(cleanKey)) {
-            matched.add(k);
-        }
-    }
-    if (matched.size === 0) {
-        for (const k of keys) {
-            const lower = k.toLowerCase();
-            if (cleanKey.includes(lower)) {
-                matched.add(k);
-            }
-        }
-    }
-    if (matched.size === 0) {
-        const normCleanKey = cleanKey.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-        for (const k of keys) {
-            const item = database[k];
-            if (!item) continue;
-            const rawText = typeof item === 'object' ? JSON.stringify(item).toLowerCase() : String(item).toLowerCase();
-            const normText = rawText.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-            if (rawText.includes(cleanKey) || normText.includes(normCleanKey)) {
-                matched.add(k);
-            }
-        }
-    }
-    return Array.from(matched);
+    return entries;
 }
 
-function findMatchingKey(key) {
-    if (isForbiddenKey(key)) return null;
-    const keys = findMatchingKeys(key);
-    return keys.length > 0 ? keys[0] : null;
+function publicData(entry) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+    return Object.fromEntries(Object.entries(entry).filter(([key]) => !metadata.has(key)));
 }
 
-function formatSingleEntry(entry) {
-    if (typeof entry === 'object' && entry !== null) {
-        const keys = Object.keys(entry).filter(k => k !== 'protected' && k !== 'updatedAt');
-        if (keys.length === 1 && (entry.content || entry.resumo)) {
-            return entry.content || entry.resumo;
-        }
-        return keys
-            .map(k => `${k}: ${typeof entry[k] === 'object' ? JSON.stringify(entry[k]) : entry[k]}`)
-            .join('\n');
+function format(entry) {
+    const value = publicData(entry);
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+        const fields = Object.entries(value);
+        if (typeof value.content === 'string' && fields.every(([key]) => ['content', 'resumo'].includes(key))) return value.content;
+        if (fields.length === 1 && typeof value.resumo === 'string') return value.resumo;
+        return fields.map(([key, field]) => key + ': ' + (typeof field === 'object' ? JSON.stringify(field) : field)).join('\n');
     }
-    return String(entry);
+    return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
-function readDb(key, guildId = null, isOwner = false) {
-    if (!canRead(guildId)) {
-        return {
-            success: false,
-            error: 'disabled',
-            message: 'A leitura do banco de dados está desativada no momento.'
-        };
+function match(entries, key) {
+    const query = fold(key);
+    const candidates = [...entries.values()];
+    const exactAndRelated = candidates.filter(({ key }) => {
+        const candidate = fold(key);
+        return candidate === query || ['_', '-', ' '].some(separator => candidate.startsWith(query + separator));
+    });
+    if (exactAndRelated.length) {
+        const exact = entries.get(key);
+        return exact ? [exact, ...exactAndRelated.filter(item => item !== exact)] : exactAndRelated;
     }
-    loadDatabase();
-    const cleanKey = String(key || '').trim().toLowerCase();
-    if (!cleanKey || isForbiddenKey(cleanKey)) {
-        return {
-            success: false,
-            error: 'reserved_key',
-            message: 'Chave reservada inválida.'
-        };
-    }
-    if (isBulkQuery(cleanKey) && !isOwner) {
-        return {
-            success: false,
-            error: 'bulk_denied',
-            message: 'Consultas globais ou em massa ao banco de dados são restritas por segurança e privacidade.'
-        };
-    }
+    if (query.length < 3) return [];
+    const partial = candidates.filter(({ key }) => fold(key).includes(query));
+    return partial.length ? partial : candidates.filter(({ entry }) => fold(format(entry) || '').includes(query));
+}
 
-    const matchedKeys = findMatchingKeys(cleanKey);
-    const totalKeys = Object.keys(database).length;
-    if (matchedKeys.length === 0) {
-        return {
-            success: false,
-            error: 'not_found',
-            key: cleanKey,
-            availableKeys: isOwner ? Object.keys(database) : [],
-            message: `Nenhum dado encontrado para a chave "${key}".`
-        };
-    }
-
-    if (matchedKeys.length === totalKeys && totalKeys > 3 && !isOwner) {
-        return {
-            success: false,
-            error: 'bulk_denied',
-            message: 'Consultas globais ou em massa ao banco de dados são restritas por segurança e privacidade.'
-        };
-    }
-
-    if (matchedKeys.length === 1) {
-        const resolvedKey = matchedKeys[0];
-        const entry = database[resolvedKey];
-        const formatted = formatSingleEntry(entry);
-        return {
-            success: true,
-            key: resolvedKey,
-            data: entry,
-            formatted,
-            isProtected: Boolean(entry && entry.protected),
-            count: 1
-        };
-    }
-
-    const entriesData = {};
-    const formattedBlocks = [];
-    for (const k of matchedKeys) {
-        const item = database[k];
-        entriesData[k] = item;
-        const block = formatSingleEntry(item);
-        formattedBlocks.push(`--- Registro: "${k}" ---\n${block}`);
-    }
-    const formatted = `[${matchedKeys.length} registros encontrados para "${key}"]:\n\n${formattedBlocks.join('\n\n')}`;
-    return {
-        success: true,
-        key: cleanKey,
-        data: entriesData,
-        formatted,
-        matchedKeys,
-        count: matchedKeys.length,
-        isProtected: matchedKeys.some(k => database[k] && database[k].protected)
+function readDb(key, guildId = null, userContext = false) {
+    if (!canRead(guildId)) return failure('disabled', 'A leitura da memória está desativada.');
+    const clean = normalize(key);
+    if (isForbiddenKey(clean)) return failure('reserved_key', 'Informe uma chave válida para consultar.');
+    const actor = context(userContext);
+    if (isBulkQuery(clean) && !actor.isOwner) return failure('bulk_denied', 'Informe um tópico específico para consultar.');
+    const data = loadDatabase();
+    if (!data) return unavailable();
+    const entries = visibleEntries(data, guildId, actor);
+    const official = officialKeys.has(clean);
+    const matches = official ? [entries.get(clean)].filter(item => item?.entry?.protected === true)
+        : isBulkQuery(clean) ? [...entries.values()].filter(item => !officialKeys.has(normalize(item.key)))
+        : match(new Map([...entries].filter(([key]) => !officialKeys.has(key))), clean);
+    if (!matches.length) return {
+        ...failure('not_found', 'Nenhuma anotação encontrada para esse tópico.'),
+        availableKeys: actor.isOwner ? [...entries.keys()] : []
     };
+    if (matches.length > 8 && !isBulkQuery(clean)) return failure('too_many_matches', 'Encontrei muitos registros. Informe um tópico mais específico.');
+    const selected = matches.slice(0, 8);
+    if (selected.length === 1) {
+        const [{ key, entry }] = selected;
+        return { success: true, key, data: publicData(entry), formatted: format(entry), count: 1, isProtected: entry?.protected === true };
+    }
+    const formatted = selected.map(({ key, entry }) => 'Registro "' + key + '":\n' + format(entry)).join('\n\n');
+    return {
+        success: true, key: clean, data: Object.fromEntries(selected.map(({ key, entry }) => [key, publicData(entry)])),
+        formatted, matchedKeys: selected.map(item => item.key), count: selected.length, isProtected: selected.some(item => item.entry?.protected === true)
+    };
+}
+
+function pruneArchive(data, now = Date.now()) {
+    if (!Array.isArray(data[archiveKey])) return false;
+    const active = data[archiveKey].filter(item => item.expiresAt > now);
+    if (active.length === data[archiveKey].length) return false;
+    if (active.length) data[archiveKey] = active;
+    else delete data[archiveKey];
+    return true;
+}
+
+function archiveRecord(data, storageKey, record, recordId, deleted) {
+    const now = Date.now();
+    pruneArchive(data, now);
+    const archive = data[archiveKey] ||= [];
+    archive.unshift({ id: randomUUID(), storageKey, record, recordId, deleted, savedAt: now, expiresAt: now + retentionMs });
+    const versions = archive.filter(item => item.recordId === recordId && !item.deleted);
+    const expiredIds = new Set(versions.slice(maxRevisions).map(item => item.id));
+    data[archiveKey] = archive.filter(item => !expiredIds.has(item.id));
+}
+
+function revision(storageKey, record) {
+    return createHash('sha256').update(JSON.stringify([storageKey, record])).digest('hex');
+}
+
+function canChange(record, actor) {
+    return actor.isOwner || (!record?.protected && (actor.isStaff || owns(record, actor)));
+}
+
+function author(entry) {
+    return entry?.savedByTag || entry?.salvo_por?.split?.(' - ')?.[0] || 'Autoria não registrada';
+}
+
+function describe(key, storageKey, record) {
+    return { key, content: format(record) || '', author: author(record), revision: revision(storageKey, record) };
+}
+
+function review(key, storageKey, record, extra = {}) {
+    return { success: false, error: 'confirmation_required', review: { ...describe(key, storageKey, record), ...extra } };
+}
+
+function mutate(operation, key, content, options, guildId, actor, meta, approval = {}) {
+    if (!operation.can(guildId)) return failure('disabled', 'Esta operação de memória está desativada.');
+    const clean = normalize(key);
+    if (isForbiddenKey(clean) || isBulkQuery(clean)) return failure('reserved_key', 'Informe a chave exata de uma anotação.');
+    const data = loadDatabase();
+    if (!data) return unavailable();
+    const existing = visibleEntries(data, guildId, actor).get(clean);
+    if (!existing && operation.name !== 'write') return failure('not_found', 'Nenhuma anotação encontrada com essa chave exata.');
+    const record = existing?.entry;
+    const protectedRecord = record?.protected === true;
+    if ((protectedRecord || officialKeys.has(clean)) && !actor.isOwner) return failure('protected', 'Esta chave é reservada ao proprietário da instância.');
+    if (existing && !canChange(record, actor)) {
+        return failure('permission_denied', 'Apenas o autor, a moderação deste servidor ou o proprietário da instância podem alterar esta anotação.');
+    }
+    if (!existing && !actor.userId && !actor.isOwner) return failure('permission_denied', 'Não foi possível identificar o autor da anotação.');
+    const storageKey = existing?.storageKey || (officialKeys.has(clean) ? clean : prefix(guildId, actor) + clean);
+    const currentRevision = revision(storageKey, record);
+    if (approval.expected && approval.expected !== currentRevision) {
+        return failure('changed', 'A anotação mudou desde a revisão. Abra o painel novamente.');
+    }
+    const requiresReview = Boolean(existing && (approval.forceReview || operation.name !== 'edit'));
+    if (operation.name === 'delete') {
+        if (approval.requireReview && !approval.expected) return review(clean, storageKey, record);
+        archiveRecord(data, storageKey, record, record?.recordId || randomUUID(), true);
+        delete data[storageKey];
+        return saveDatabase(data) ? { success: true, key: existing.key, message: 'Anotação excluída.' } : unavailable();
+    }
+    const text = typeof content === 'string' ? content.trim() : null;
+    const objectContent = operation.name === 'write' && content && typeof content === 'object' && !Array.isArray(content);
+    if (!text && !objectContent) return failure('invalid_content', 'Informe o conteúdo da anotação.');
+    const next = operation.name === 'edit' && record && typeof record === 'object' && !Array.isArray(record) ? publicData(record) : {};
+    if (objectContent) {
+        const fields = publicData(content);
+        if (!Object.keys(fields).length) return failure('invalid_content', 'Informe o conteúdo da anotação.');
+        Object.assign(next, Object.fromEntries(Object.entries(fields).filter(([field]) => !isForbiddenKey(field))));
+        if (!Object.keys(next).length) return failure('invalid_content', 'Informe o conteúdo da anotação.');
+    } else {
+        const previous = typeof record === 'string' ? record : record?.content || record?.resumo;
+        next.content = options.append && previous ? String(previous) + '\n' + text : text;
+        if (Object.hasOwn(next, 'resumo')) next.resumo = next.content;
+    }
+    if (JSON.stringify(next).length > 16000) return failure('invalid_content', 'A anotação excede o limite de tamanho.');
+    if (approval.requireReview && requiresReview && !approval.expected) {
+        return review(clean, storageKey, record, { replacement: format(next) });
+    }
+    const sourceRecordId = record?.recordId || randomUUID();
+    if (existing) archiveRecord(data, storageKey, record, sourceRecordId, false);
+    data[storageKey] = {
+        ...next,
+        recordId: sourceRecordId,
+        subjectUserId: (existing ? owns(record, actor) : actor.userId) && options.subjectUserId === actor.userId
+            ? actor.userId : null,
+        protected: protectedRecord || officialKeys.has(clean),
+        salvo_por: existing ? record?.salvo_por ?? null : meta.salvo_por ?? null,
+        savedById: existing ? record?.savedById ?? null : actor.userId ?? null,
+        savedByTag: existing ? record?.savedByTag ?? null : meta.userTag ?? meta.savedByTag ?? null,
+        important: options.important ?? record?.important ?? false,
+        updatedAt: new Date().toISOString()
+    };
+    const action = operation.name === 'edit' ? 'atualizada' : 'gravada';
+    return saveDatabase(data) ? { success: true, key: existing?.key || clean, data: next, message: 'Anotação ' + action + '.' } : unavailable();
 }
 
 function writeDb(key, data, guildId = null, isOwner = false, meta = {}) {
-    if (!canWrite(guildId)) {
-        return {
-            success: false,
-            error: 'disabled',
-            message: 'A gravação no banco de dados está desativada no momento.'
-        };
-    }
-    loadDatabase();
-    const cleanKey = String(key || '').trim().toLowerCase();
-    if (!cleanKey) {
-        return {
-            success: false,
-            error: 'invalid_key',
-            message: 'Chave inválida fornecida para gravação.'
-        };
-    }
-    if (['__proto__', 'constructor', 'prototype'].includes(cleanKey)) {
-        return {
-            success: false,
-            error: 'reserved_key',
-            message: 'Chave reservada inválida.'
-        };
-    }
-    const existing = database[cleanKey];
-    if (existing && existing.protected && !isOwner) {
-        return {
-            success: false,
-            error: 'protected',
-            message: `O registro "${cleanKey}" é protegido pelo criador e não pode ser sobrescrito.`
-        };
-    }
-    const currentUserId = meta.userId || meta.savedById || null;
-    const isStaff = Boolean(meta.isStaff || meta.isAdmin);
-    const isAuthor = Boolean(existing && existing.savedById && currentUserId && String(existing.savedById) === String(currentUserId));
-    if (existing && !isOwner && !isStaff && !isAuthor) {
-        return {
-            success: false,
-            error: 'permission_denied',
-            message: `O registro "${cleanKey}" já existe e pertence a ${existing.salvo_por || existing.savedByTag || 'outro usuário'}. Apenas o autor original, a moderação ou o criador da Hikari podem sobrescrevê-lo.`
-        };
-    }
-    const salvoPor = meta.salvo_por || (meta.userTag && meta.userId ? `${meta.userTag} - ${meta.userId}` : (existing && existing.salvo_por ? existing.salvo_por : null));
-    const savedById = meta.savedById || meta.userId || (existing && existing.savedById ? existing.savedById : null);
-    const savedByTag = meta.savedByTag || meta.userTag || (existing && existing.savedByTag ? existing.savedByTag : null);
-    const isImportant = meta.important !== undefined ? Boolean(meta.important) : (existing && existing.important !== undefined ? Boolean(existing.important) : false);
-
-    let recordToSave;
-    if (typeof data === 'object' && data !== null) {
-        recordToSave = {
-            ...data,
-            protected: existing ? Boolean(existing.protected) : false,
-            salvo_por: salvoPor,
-            savedById: savedById,
-            savedByTag: savedByTag,
-            important: isImportant,
-            updatedAt: new Date().toISOString()
-        };
-    } else {
-        recordToSave = {
-            content: String(data),
-            protected: existing ? Boolean(existing.protected) : false,
-            salvo_por: salvoPor,
-            savedById: savedById,
-            savedByTag: savedByTag,
-            important: isImportant,
-            updatedAt: new Date().toISOString()
-        };
-    }
-    database[cleanKey] = recordToSave;
-    saveDatabase();
-    return {
-        success: true,
-        key: cleanKey,
-        data: recordToSave,
-        message: `Dados gravados com sucesso na chave "${cleanKey}".`
-    };
+    return mutate({ name: 'write', can: canWrite }, key, data, { important: meta.important }, guildId,
+        { isOwner, isStaff: Boolean(guildId && (meta.isStaff || meta.isAdmin)), userId: meta.userId || meta.savedById }, meta);
 }
-
-function editDb(key, newContent, options = {}, guildId = null, userContext = {}, meta = {}) {
-    if (!canEdit(guildId)) {
-        return {
-            success: false,
-            error: 'disabled',
-            message: 'A edição no banco de dados está desativada no momento.'
-        };
-    }
-    loadDatabase();
-    const cleanKey = String(key || '').trim().toLowerCase();
-    if (!cleanKey) {
-        return {
-            success: false,
-            error: 'invalid_key',
-            message: 'Chave inválida fornecida para edição.'
-        };
-    }
-    if (['__proto__', 'constructor', 'prototype'].includes(cleanKey)) {
-        return {
-            success: false,
-            error: 'reserved_key',
-            message: 'Chave reservada inválida.'
-        };
-    }
-    const resolvedKey = findMatchingKey(cleanKey);
-    if (!resolvedKey || !database[resolvedKey]) {
-        return {
-            success: false,
-            error: 'not_found',
-            message: `O registro "${cleanKey}" não foi encontrado no banco de dados para ser editado. Utilize db_write se desejar criar uma nova anotação.`
-        };
-    }
-    const existing = database[resolvedKey];
-    const isOwner = typeof userContext === 'boolean' ? userContext : Boolean(userContext && userContext.isOwner);
-    const isStaff = typeof userContext === 'object' && userContext !== null ? Boolean(userContext.isStaff || userContext.isAdmin) : false;
-    const currentUserId = typeof userContext === 'object' && userContext !== null ? userContext.userId : (meta && meta.userId ? meta.userId : null);
-
-    if (existing.protected && !isOwner) {
-        return {
-            success: false,
-            error: 'protected',
-            message: `O registro "${resolvedKey}" é protegido pelo criador e não pode ser alterado.`
-        };
-    }
-
-    const isAuthor = Boolean(existing.savedById && currentUserId && String(existing.savedById) === String(currentUserId));
-    const isImportant = Boolean(existing.important);
-
-    if (isImportant && !isOwner && !isStaff && !isAuthor) {
-        return {
-            success: false,
-            error: 'author_confirmation_required',
-            key: resolvedKey,
-            savedBy: existing.salvo_por || existing.savedByTag || 'outro usuário',
-            savedById: existing.savedById || null,
-            message: `O registro "${resolvedKey}" é importante e foi salvo por ${existing.salvo_por || existing.savedByTag || 'outro usuário'}. Apenas o próprio autor ou a administração podem autorizar a edição.`
-        };
-    }
-
-    const shouldAppend = typeof options === 'boolean' ? options : Boolean(options && options.append);
-    let updatedContent = String(newContent || '').trim();
-
-    const salvoPor = existing.salvo_por || meta.salvo_por || (meta.userTag && meta.userId ? `${meta.userTag} - ${meta.userId}` : null);
-    const savedById = existing.savedById || meta.savedById || meta.userId || null;
-    const savedByTag = existing.savedByTag || meta.savedByTag || meta.userTag || null;
-    const nextImportant = options.important !== undefined ? Boolean(options.important) : (meta.important !== undefined ? Boolean(meta.important) : (existing.important !== undefined ? Boolean(existing.important) : false));
-
-    let recordToSave;
-    if (typeof existing === 'object' && existing !== null) {
-        let finalContent = updatedContent;
-        if (shouldAppend) {
-            const baseContent = existing.content || existing.resumo || '';
-            finalContent = baseContent ? `${baseContent}\n${updatedContent}`.trim() : updatedContent;
-        }
-
-        recordToSave = {
-            ...existing,
-            content: finalContent,
-            resumo: finalContent,
-            protected: Boolean(existing.protected),
-            salvo_por: salvoPor,
-            savedById: savedById,
-            savedByTag: savedByTag,
-            important: nextImportant,
-            updatedAt: new Date().toISOString()
-        };
-    } else {
-        let finalContent = updatedContent;
-        if (shouldAppend && existing) {
-            finalContent = `${String(existing)}\n${updatedContent}`.trim();
-        }
-        recordToSave = {
-            content: finalContent,
-            protected: false,
-            salvo_por: salvoPor,
-            savedById: savedById,
-            savedByTag: savedByTag,
-            important: nextImportant,
-            updatedAt: new Date().toISOString()
-        };
-    }
-
-    database[resolvedKey] = recordToSave;
-    saveDatabase();
-    return {
-        success: true,
-        key: resolvedKey,
-        data: recordToSave,
-        message: `Registro "${resolvedKey}" atualizado com sucesso no banco de dados.`
-    };
+function editDb(key, content, options = {}, guildId = null, userContext = {}, meta = {}) {
+    const actor = context(userContext);
+    return mutate({ name: 'edit', can: canEdit }, key, content, typeof options === 'boolean' ? { append: options } : options || {},
+        guildId, { ...actor, userId: actor.userId || meta.userId, isStaff: Boolean(guildId && (actor.isStaff || actor.isAdmin)) }, meta);
 }
-
 function deleteDb(key, guildId = null, userContext = {}) {
-    if (!canDelete(guildId)) {
-        return {
-            success: false,
-            error: 'disabled',
-            message: 'A exclusão no banco de dados está desativada no momento.'
-        };
-    }
-    loadDatabase();
-    const cleanKey = String(key || '').trim().toLowerCase();
-    if (!cleanKey || isForbiddenKey(cleanKey)) {
-        return {
-            success: false,
-            error: 'reserved_key',
-            message: 'Chave reservada inválida.'
-        };
-    }
-    const resolvedKey = findMatchingKey(cleanKey);
-    if (!resolvedKey || !database[resolvedKey]) {
-        return {
-            success: false,
-            error: 'not_found',
-            message: `Registro "${cleanKey}" não encontrado para exclusão.`
-        };
-    }
-    const existing = database[resolvedKey];
-    const isOwner = typeof userContext === 'boolean' ? userContext : Boolean(userContext && userContext.isOwner);
-    const isStaff = typeof userContext === 'object' && userContext !== null ? Boolean(userContext.isStaff || userContext.isAdmin) : false;
-    const currentUserId = typeof userContext === 'object' && userContext !== null ? userContext.userId : null;
+    const actor = context(userContext);
+    return mutate({ name: 'delete', can: canDelete }, key, null, {}, guildId,
+        { ...actor, isStaff: Boolean(guildId && (actor.isStaff || actor.isAdmin)) }, {});
+}
 
-    if (existing.protected && !isOwner) {
-        return {
-            success: false,
-            error: 'protected',
-            message: `O registro "${resolvedKey}" é protegido pelo criador e não pode ser excluído.`
-        };
+const operations = { write: canWrite, edit: canEdit, delete: canDelete };
+
+function requestChange(operation, key, content, options, guildId, userContext, approval = {}) {
+    if (!Object.hasOwn(operations, operation)) return failure('invalid_operation', 'Operação inválida.');
+    const actor = context(userContext);
+    const meta = { userTag: actor.userTag, salvo_por: actor.userTag ? actor.userTag + ' - ' + actor.userId : null };
+    return mutate({ name: operation, can: operations[operation] }, key, content, options, guildId,
+        { ...actor, isStaff: Boolean(guildId && actor.isStaff) }, meta, { requireReview: true, ...approval });
+}
+
+function archiveInScope(item, scope, guildId, actor) {
+    if (scope && item.storageKey.startsWith(scope)) return true;
+    return !guildId && !item.storageKey.startsWith('@') && (actor.isOwner || owns(item.record, actor));
+}
+
+function archiveDisplayKey(item, scope) {
+    return scope && item.storageKey.startsWith(scope) ? item.storageKey.slice(scope.length) : item.storageKey;
+}
+
+function readPersonalNotes(guildId, actor) {
+    if (!canRead(guildId)) return failure('disabled', 'A leitura da memória está desativada.');
+    if (!actor?.userId) return failure('permission_denied', 'Não foi possível identificar o autor da mensagem.');
+    const data = loadDatabase();
+    if (!data) return unavailable();
+    const scope = prefix(guildId, actor);
+    const notes = Object.entries(data).filter(([key, entry]) => key.startsWith(scope) &&
+        entry?.subjectUserId === actor.userId && owns(entry, actor)).slice(0, 8);
+    if (!notes.length) return failure('not_found', 'Ainda não tenho uma anotação confirmada sobre seus gostos neste contexto.');
+    return { success: true, formatted: notes.map(([, entry]) => format(entry)).join('\n').slice(0, 4000) };
+}
+
+function manageList(view, guildId, actor, query = '') {
+    if (!canRead(guildId)) return failure('disabled', 'A leitura da memória está desativada.');
+    const data = loadDatabase();
+    if (!data) return unavailable();
+    const scope = prefix(guildId, actor);
+    const filter = fold(query.trim());
+    let records;
+    if (view === 'legacy') {
+        if (!actor.isOwner || guildId) return failure('permission_denied', 'Abra o painel de legados em DM como dono da instância.');
+        records = Object.entries(data).filter(([key, entry]) => !isForbiddenKey(key) && !entry?.protected && !officialKeys.has(normalize(key)))
+            .map(([key, entry]) => describe(key, key, entry));
+    } else if (view === 'trash' || view === 'history') {
+        if (!scope) return failure('permission_denied', 'Não foi possível identificar esta conversa.');
+        records = (data[archiveKey] || []).filter(item => item.expiresAt > Date.now() && item.deleted === (view === 'trash') &&
+            archiveInScope(item, scope, guildId, actor) && canChange(item.record, actor))
+            .map(item => ({ ...describe(archiveDisplayKey(item, scope), item.storageKey, item.record),
+                id: item.id, savedAt: item.savedAt, expiresAt: item.expiresAt }));
+    } else {
+        const editEnabled = canEdit(guildId);
+        const deleteEnabled = canDelete(guildId);
+        records = [...visibleEntries(data, guildId, actor).values()].map(({ key, storageKey, entry }) => ({
+            ...describe(key, storageKey, entry),
+            canEdit: editEnabled && canChange(entry, actor),
+            canDelete: deleteEnabled && canChange(entry, actor)
+        }));
+        records.sort((a, b) => a.key.localeCompare(b.key, 'pt-BR'));
     }
+    return { success: true, records: records.filter(record => !filter ||
+        fold(record.key).includes(filter) || fold(record.content).includes(filter)) };
+}
 
-    const isAuthor = Boolean(existing.savedById && currentUserId && String(existing.savedById) === String(currentUserId));
-
-    if (!isOwner && !isStaff && !isAuthor) {
-        return {
-            success: false,
-            error: 'permission_denied',
-            key: resolvedKey,
-            savedBy: existing.salvo_por || existing.savedByTag || 'outro usuário',
-            savedById: existing.savedById || null,
-            message: `O registro "${resolvedKey}" foi salvo por ${existing.salvo_por || existing.savedByTag || 'outro usuário'}. Apenas o autor original, a moderação do servidor ou o criador da Hikari podem excluí-lo.`
-        };
+function changeArchive(action, id, guildId, actor, expected) {
+    if (!['purge', 'restore'].includes(action)) return failure('invalid_operation', 'Operação inválida.');
+    const allowed = action === 'purge' ? canDelete(guildId) : canEdit(guildId) && canWrite(guildId);
+    if (!allowed) return failure('disabled', 'Esta operação de memória está desativada.');
+    const data = loadDatabase();
+    if (!data) return unavailable();
+    pruneArchive(data);
+    const scope = prefix(guildId, actor);
+    const item = scope && data[archiveKey]?.find(entry => entry.id === id && archiveInScope(entry, scope, guildId, actor));
+    if (!item || !canChange(item.record, { ...actor, isStaff: Boolean(guildId && actor.isStaff) })) {
+        return failure('not_found', 'Esta versão saiu da lista ou você perdeu a permissão para alterá-la.');
     }
+    const key = archiveDisplayKey(item, scope);
+    const current = data[item.storageKey];
+    if (action !== 'purge' && (item.deleted ? Object.hasOwn(data, item.storageKey) : current?.recordId !== item.recordId)) {
+        return failure('conflict', 'A chave está ocupada ou a anotação foi excluída. Confira a lista atual.');
+    }
+    const snapshot = revision(item.storageKey, [item, current]);
+    if (!expected) return review(key, item.storageKey, item.record, { revision: snapshot });
+    if (snapshot !== expected) return failure('changed', 'Esta anotação mudou. Revise a operação novamente.');
+    if (action === 'purge') {
+        data[archiveKey] = data[archiveKey].filter(entry => item.deleted ? entry.recordId !== item.recordId : entry.id !== id);
+    } else {
+        data[archiveKey] = data[archiveKey].filter(entry => entry.id !== id);
+        if (current) archiveRecord(data, item.storageKey, current, item.recordId, false);
+        const record = typeof item.record === 'object' && item.record && !Array.isArray(item.record) ? item.record : { content: format(item.record) };
+        data[item.storageKey] = { ...record, recordId: item.recordId, updatedAt: new Date().toISOString() };
+    }
+    return saveDatabase(data) ? { success: true, message: action === 'purge' ? 'Cópia eliminada definitivamente da memória.' : 'Anotação restaurada.' } : unavailable();
+}
 
-    delete database[resolvedKey];
-    saveDatabase();
-    return {
-        success: true,
-        key: resolvedKey,
-        message: `Registro "${resolvedKey}" excluído com sucesso.`
+function moveLegacy(key, targetGuildId, actor, expected) {
+    if (!actor.isOwner) return failure('permission_denied', 'A migração de legados é reservada ao dono da instância.');
+    if (!/^\d{17,20}$/.test(targetGuildId) || isForbiddenKey(key) || officialKeys.has(normalize(key))) return failure('invalid_target', 'Informe uma anotação legada e um servidor válido.');
+    if (!canWrite(targetGuildId)) return failure('disabled', 'A gravação está desativada no servidor de destino.');
+    const data = loadDatabase();
+    if (!data) return unavailable();
+    const record = data[key];
+    if (!Object.hasOwn(data, key) || record?.protected) return failure('not_found', 'Esta anotação legada não pode ser movida.');
+    const destination = prefix(targetGuildId, actor) + normalize(key);
+    if (Object.hasOwn(data, destination)) return failure('conflict', 'O servidor de destino já tem uma anotação com essa chave.');
+    if (!expected) return review(key, key, record);
+    if (revision(key, record) !== expected) return failure('changed', 'O registro legado mudou. Revise a operação novamente.');
+    data[destination] = record;
+    delete data[key];
+    return saveDatabase(data) ? { success: true, message: 'Anotação movida para o servidor escolhido.' } : unavailable();
+}
+
+function startMemoryMaintenance() {
+    const run = () => {
+        const data = loadDatabase();
+        if (data && pruneArchive(data)) saveDatabase(data);
     };
+    run();
+    setInterval(run, 60 * 60 * 1000).unref();
 }
-
-function listDbKeys(guildId = null) {
-    if (!canRead(guildId)) {
-        return {
-            success: false,
-            error: 'disabled',
-            keys: []
-        };
-    }
-    loadDatabase();
-    const entries = Object.keys(database).map(k => ({
-        key: k,
-        isProtected: Boolean(database[k] && database[k].protected)
-    }));
-    return {
-        success: true,
-        keys: entries
-    };
-}
-
-function setProtection(key, isProtected) {
-    loadDatabase();
-    const cleanKey = String(key || '').trim().toLowerCase();
-    if (isForbiddenKey(cleanKey) || !Object.prototype.hasOwnProperty.call(database, cleanKey)) {
-        return false;
-    }
-    database[cleanKey].protected = Boolean(isProtected);
-    saveDatabase();
-    return true;
-}
-
-loadDatabase();
 
 module.exports = {
-    loadDatabase,
-    saveDatabase,
-    getDbSettings,
-    updateDbSetting,
-    canRead,
-    canWrite,
-    canEdit,
-    canDelete,
-    findMatchingKey,
-    findMatchingKeys,
-    isBulkQuery,
-    isForbiddenKey,
-    readDb,
-    writeDb,
-    editDb,
-    deleteDb,
-    listDbKeys,
-    setProtection,
-    setDatabasePath,
-    getDatabasePath
+    loadDatabase, getDbSettings, updateDbSetting, canRead, canWrite, canEdit, canDelete,
+    readDb, writeDb, editDb, deleteDb, isBulkQuery, isForbiddenKey, setDatabasePath, getDatabasePath,
+    requestChange, readPersonalNotes, manageList, changeArchive, moveLegacy, startMemoryMaintenance
 };

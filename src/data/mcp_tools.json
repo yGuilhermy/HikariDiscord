@@ -490,7 +490,7 @@
           },
           "important": {
             "type": "boolean",
-            "description": "Se true, indica que a informação é importante, dados pessoais, lore, regras ou algo de relevância (exige confirmação do autor ou staff para deletar). Se false (padrão), é uma anotação simples/casual."
+            "description": "Se true, indica que a informação é importante, lore, regras ou outros dados relevantes. Se false (padrão), é uma anotação simples/casual."
           }
         },
         "required": [
@@ -509,7 +509,7 @@
     "type": "function",
     "function": {
       "name": "db_edit",
-      "description": "Edita ou atualiza um registro já existente no banco de dados interno persistente. Use quando o usuário pedir para alterar, corrigir, acrescentar ou atualizar uma anotação salva anteriormente. Não cria novos registros (para novos, use db_write). AVISO: Registros protegidos pelo criador (como 'creator_info') não podem ser alterados. Se a anotação pertencer a outro usuário e estiver marcada como importante, apenas o próprio autor que a criou ou a moderação/administração do servidor têm permissão para editá-la para evitar trolls; se for simples, qualquer membro pode editar. CRÍTICO - CONDUTA, SEGURANÇA E TERMOS DE SERVIÇO: É terminantemente proibido alterar registros para incluir conteúdos tóxicos, difamatórios, depreciativos ou ataques contra usuários, violações aos Termos de Serviço ou atos ilícitos. Se solicitado, recuse diretamente na sua fala de forma natural e calma (sem emojis normais e kaomojis raros).",
+      "description": "Edita ou atualiza um registro já existente no banco de dados interno persistente. Use quando o usuário pedir para alterar, corrigir, acrescentar ou atualizar uma anotação salva anteriormente. Não cria novos registros (para novos, use db_write). AVISO: Registros protegidos pelo criador (como 'creator_info') não podem ser alterados. Use a chave exata. Apenas o autor, a moderação do mesmo servidor ou o proprietário da instância podem editar uma anotação. CRÍTICO - CONDUTA, SEGURANÇA E TERMOS DE SERVIÇO: É terminantemente proibido alterar registros para incluir conteúdos tóxicos, difamatórios, depreciativos ou ataques contra usuários, violações aos Termos de Serviço ou atos ilícitos. Se solicitado, recuse diretamente na sua fala de forma natural e calma (sem emojis normais e kaomojis raros).",
       "textual_triggers": "Gatilhos: \"mude a anotação de X para Y\", \"corrija no banco que X agora é Y\", \"atualize a anotação Z\", \"acrescente à anotação de X que Y\".",
       "textual_args": "{ \"key\": \"nome_do_topico\", \"content\": \"informação atualizada\", \"append\": false }",
       "parameters": {
@@ -548,7 +548,7 @@
     "type": "function",
     "function": {
       "name": "db_delete",
-      "description": "Remove um registro da memória interna persistente. Use quando o usuário pedir para esquecer ou deletar um dado salvo. AVISO: Registros protegidos pelo criador (como 'creator_info') não podem ser excluídos. Se o registro pertencer a outro usuário e estiver marcado como importante, apenas o próprio autor que salvou ou a moderação/administração do servidor têm permissão para confirmar a exclusão para evitar trolls; caso seja uma anotação simples ou casual, a exclusão é liberada.",
+      "description": "Remove um registro da memória interna persistente. Use quando o usuário pedir para esquecer ou deletar um dado salvo. AVISO: Registros protegidos pelo criador (como 'creator_info') não podem ser excluídos. Use a chave exata. Apenas o autor, a moderação do mesmo servidor ou o proprietário da instância podem excluir uma anotação.",
       "textual_triggers": "Gatilhos: \"esqueça sobre X\", \"delete a anotação Y do banco\".",
       "textual_args": "{ \"key\": \"nome_do_topico\" }",
       "parameters": {

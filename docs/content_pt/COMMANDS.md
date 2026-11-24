@@ -9,6 +9,7 @@ Em `/ia_chat`, só `prompt` é obrigatório. Escolha `visibilidade=public` se qu
 | Comando | Parâmetros | O que faz |
 | :--- | :--- | :--- |
 | `/ia_chat` | `prompt`, `[visibilidade=public/private]`, `[voice=true/false]` | Faça uma pergunta ou um pedido. A resposta é privada por padrão e pode ser enviada em voz. |
+| `/memoria` | `[busca]` | Abre o painel privado de anotações, lixeira e histórico. |
 | `/chat_resumo` | `[quantidade=10–100]` | Resume as mensagens recentes do canal. A quantidade aceita vai de 10 a 100. |
 | `/ajuda` | — | Abre este painel com a lista de comandos. |
 

@@ -87,25 +87,14 @@ Hikari doesn't ignore voice notes sent in channels! When called upon in a chat w
 
 ## 💾 6. Permanent AI Database & On-Demand Memory (Zero Token Overhead)
 
-To avoid inflating the System Prompt on every request with hundreds of static tokens or historical facts, Hikari features an **autonomous permanent database** (`src/data/ai_database.json`).
+Use `/memoria` to search by key or text, see authorship, and create, edit or delete a note in a private panel. Server notes stay within their server and DM notes are scoped to the user. Official Hikari records remain available.
 
-- **On-Demand Retrieval & Multi-Topic Aggregation (`db_read`):** Rather than stuffing all context into the prompt, the AI autonomously queries memory. It features tiered key lookup and **automatic aggregation**: if multiple records exist regarding a topic (e.g., `sekinin`, `sekinin_rules`, `sekinin_events`), it correlates and synthesizes all of them into a single, cohesive answer.
-- **Author Tracking & Auditing (`db_write`):** Whenever storing a record, Hikari records authorship metadata (`salvo_por: "username - id"`, `savedById`, `savedByTag`) and an importance classification (`important: boolean`, default `false`), intelligently evaluated by the AI.
-- **Secure Editing (`db_edit`):** Allows updating, correcting, or appending to existing notes while preserving authorship and history.
-- **Controlled Deletion (`db_delete`):** Removes records from disk when explicitly requested.
-- **Protection Against Unauthorized Edits & Deletions:**
-  - Records tagged as **important** (`important: true`) can only be modified or deleted by the **original author** who created them, by **Server Staff/Moderators** (`Administrator`, `ManageGuild`, `ManageMessages`, or Server Owner), or by the **Bot Creator** (`isOwner`).
-  - Unauthorized attempts by regular members are politely and naturally refused in chat by Hikari (without emojis), safeguarding community lore and notes against trolls.
-  - Regular records can be edited when the tool is enabled. Replacing or deleting any record requires the author, server moderation or the instance owner.
-- **Privacy Shield Against Bulk Dumps:** The AI is strictly barred from dumping the entire database (`*`, `all`, `dump`) for regular users, naturally explaining privacy constraints and asking the user to specify a topic.
-- **Conduct Directives & Harmful Content Prevention:** Hikari strictly refuses to store defamatory notes, user harassment, attacks, Discord TOS violations, or criminal activities in the database.
-- **Visual Footer Identification:** Responses derived from database lookups display the footer badge `-# 💾 Database`.
-- **Creator Protection (`protected: true`):** Core structural records (such as `creator_info`) are locked against modification or deletion by anyone other than the bot creator.
-- **Scope.** The database belongs to the instance. Per-server settings control tool access, and records use the same shared file.
-- **Granular Control via Environment & Panel:** Access can be individually managed via `.env` (`AI_DB_READ`, `AI_DB_WRITE`, `AI_DB_EDIT`, `AI_DB_DELETE`) or toggled inside the Owner Config Panel (`/config_criador bot_config`). Disabling read access automatically cascades to block write, edit, and delete operations.
-- **Open-Source Privacy:** The database file `src/data/ai_database.json` is ignored in `.gitignore`, ensuring personal notes never leak to public repositories.
+Chat mutations require an explicit request in the current message. Use the exact key to edit or delete. Edits, overwrites and deletions require a review and confirmation within five minutes. Authors, moderators in the same server and the instance owner may change notes subject to tool permissions.
 
----
+Trash and up to five previous revisions per note are kept for seven days. You can restore or permanently remove them from the panel. In a bot DM, the instance owner can review legacy notes and move individual notes to a chosen server.
+
+The bot stores notes in `src/data/ai_database.json`. It reads notes on demand and only confirms changes after writing to disk.
+
 
 ## 🎙️ 7. Native Voice Messages (XTTS v2 Neural Voice)
 

@@ -87,25 +87,14 @@ A Hikari não ignora áudios enviados nos canais! Quando acionada em um chat cuj
 
 ## 💾 6. Banco de Dados Permanente & Memória Sob Demanda (Zero Token Overhead)
 
-Para evitar inflar o System Prompt a cada requisição com centenas de tokens de dados fixos ou fatos históricos, a Hikari conta com um sistema de **banco de dados permanente autônomo** (`src/data/ai_database.json`).
+Abra `/memoria` para buscar pela chave ou pelo texto, consultar a autoria e criar, editar ou excluir uma anotação. O painel é privado. As anotações do servidor ficam naquele servidor, e as de DM ficam vinculadas ao usuário. Os registros oficiais da Hikari continuam acessíveis.
 
-- **Consulta Sob Demanda & Agregação Multitópicos (`db_read`):** Em vez de carregar tudo no prompt, a IA decide autonomamente quando precisa consultar a memória. Possui busca inteligente em camadas e **agregação automática**: se existirem múltiplos registros sobre um mesmo assunto (ex: `sekinin`, `sekinin_regras`, `sekinin_eventos`), ela unifica e sintetiza todos em uma única resposta completa.
-- **Escrita e Auditoria de Autoria (`db_write`):** Ao salvar um registro, a Hikari grava automaticamente os metadados de autoria (`salvo_por: "usuario - id"`, `savedById`, `savedByTag`) e a classificação de relevância (`important: boolean`, padrão `false`), avaliada inteligentemente pela própria IA.
-- **Edição Segura (`db_edit`):** Permite alterar, corrigir ou acrescentar novas informações a anotações prévias, preservando o histórico e a autoria.
-- **Exclusão Controlada (`db_delete`):** Remove registros da memória quando solicitado.
-- **Trava contra Deleção e Adulteração por Terceiros:**
-  - Registros marcados como **importantes** (`important: true`) só podem ser alterados ou excluídos pelo **próprio autor** que os criou, por membros da **Staff/Moderação** (`Administrator`, `ManageGuild`, `ManageMessages` ou Dono do Servidor) ou pelo **Criador do Bot** (`isOwner`).
-  - Tentativas de outros membros comuns são recusadas pela Hikari de forma amigável e natural no chat (sem emojis), protegendo anotações da comunidade contra trolls.
-  - Registros comuns podem ser editados se a ferramenta estiver habilitada. Sobrescrever ou excluir qualquer registro exige autoria, moderação ou propriedade da instância.
-- **Blindagem contra Vazamento e Dumps em Massa:** A IA é instruída e bloqueada de realizar despejos globais de todo o banco de dados (`*`, `tudo`, `dump`) para usuários comuns por motivos de segurança e privacidade, direcionando o usuário a especificar o tópico desejado (com bypass para o Criador).
-- **Diretriz de Conduta e Proteção contra Conteúdo Nocivo:** A IA recusa categoricamente gravar acusações, difamações, ataques contra usuários, apologia a crimes ou violações aos Termos de Serviço do Discord no banco de dados.
-- **Identificação Visual no Rodapé:** Respostas formuladas com base em dados recuperados do banco exibem o indicador `-# 💾 Database`.
-- **Proteção do Criador (`protected: true`):** Registros estruturais (como `creator_info`) são blindados contra sobrescrita e deleção por qualquer usuário além do dono do bot.
-- **Escopo.** O banco pertence à instância. As permissões por servidor controlam as ferramentas, mas os registros usam o mesmo arquivo compartilhado.
-- **Controle Granular por Variáveis e Painel:** O acesso pode ser gerenciado individualmente via `.env` (`AI_DB_READ`, `AI_DB_WRITE`, `AI_DB_EDIT`, `AI_DB_DELETE`) ou pelos botões do Painel de Configuração do Criador (`/config_criador bot_config`). Caso a leitura seja desativada, a escrita e deleção são automaticamente bloqueadas por segurança.
-- **Privacidade Open-Source:** O arquivo físico `src/data/ai_database.json` é ignorado no `.gitignore`, garantindo que informações pessoais e dados locais nunca vazem para o repositório público do GitHub.
+A Hikari só grava por chat quando o pedido de alteração está na mensagem atual. Use a chave exata para editar ou excluir. Edições, sobrescritas e exclusões pedem revisão e confirmação em até cinco minutos. O autor, a moderação do mesmo servidor e o dono da instância podem alterar anotações conforme as permissões das ferramentas.
 
----
+A lixeira e até cinco versões anteriores por anotação ficam disponíveis por sete dias. No painel, é possível restaurar ou eliminar cópias antes do prazo. O dono da instância também pode, em DM, revisar anotações legadas e mover cada uma para um servidor escolhido.
+
+A persistência usa `src/data/ai_database.json`. A leitura é feita sob demanda, e a confirmação de alteração só é enviada após a gravação em disco.
+
 
 ## 🎙️ 7. Mensagens de Voz Nativas (XTTS v2 Neural Voice)
 

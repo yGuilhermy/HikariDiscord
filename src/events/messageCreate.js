@@ -21,10 +21,15 @@ async function buildMessagePrompt(message, client, options = {}) {
     }
     currentUserPrompt = resolveMentions(currentUserPrompt, client);
     const history = [];
+    let referenceTopic = null;
     let repliedMessage = null;
+    let quotedParent = null;
     if (message.reference && message.reference.messageId) {
         try {
             repliedMessage = await message.channel.messages.fetch(message.reference.messageId);
+            quotedParent = repliedMessage?.author?.id === client.user.id && repliedMessage.reference?.messageId
+                ? await message.channel.messages.fetch(repliedMessage.reference.messageId).catch(() => null) : null;
+            referenceTopic = quotedParent?.content || repliedMessage?.content || null;
         } catch (err) {
             console.error(err.message);
         }
@@ -32,6 +37,7 @@ async function buildMessagePrompt(message, client, options = {}) {
     const limit = isChatter ? 5 : 10;
     const recentMessages = await message.channel.messages.fetch({ limit, before: message.id });
     const messageMap = new Map();
+    if (quotedParent) messageMap.set(quotedParent.id, quotedParent);
     if (repliedMessage) messageMap.set(repliedMessage.id, repliedMessage);
     recentMessages.forEach(msg => {
         if (msg.author.bot && msg.author.id !== client.user.id) return;
@@ -51,8 +57,12 @@ async function buildMessagePrompt(message, client, options = {}) {
     for (const msg of filteredMessages) {
         const isBot = msg.author.id === client.user.id;
         const authorName = isBot ? 'Hikari' : msg.author.username;
-        let rawContent = await resolveMessageAudioContent(msg);
-        rawContent = await resolveMessageVisualContent(msg, rawContent);
+        const isQuoted = msg.id === repliedMessage?.id || msg.id === quotedParent?.id;
+        let rawContent = msg.content || '';
+        if (isQuoted || msg.author.id === message.author.id) {
+            rawContent = await resolveMessageAudioContent(msg);
+            rawContent = await resolveMessageVisualContent(msg, rawContent);
+        }
         let content = resolveMentions(rawContent, client);
         if (isBot && (content.includes('erro ao processar seu pedido') || content.includes('Limites de Processamento Atingidos') || content.includes('Desculpe, tive um erro'))) {
             content = 'erro da ia';
@@ -61,8 +71,11 @@ async function buildMessagePrompt(message, client, options = {}) {
             content = content.replace(/^-# .*$/gm, '').replace(/🧠 \*\*Processando\.\.\.\*\*/g, '').replace(/🎙️ \*\*Gravando voz\.\.\.\*\*/g, '').trim();
         }
         if (content.trim().length === 0) continue;
-        if (content.length > 2500) content = content.substring(0, 2500) + '...';
-        history.push(`${authorName}: ${content}`);
+        const maxContent = isQuoted ? 1800 : 750;
+        if (content.length > maxContent) content = content.slice(0, maxContent) + '…';
+        history.push({ id: msg.id, authorId: msg.author.id, name: authorName,
+            replyTo: msg.reference?.messageId || null, replyToAuthorId: msg.mentions?.repliedUser?.id || null,
+            quoted: isQuoted, text: content });
     }
     const currentDate = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
     let envInfo = '';
@@ -74,8 +87,13 @@ async function buildMessagePrompt(message, client, options = {}) {
         : isChatter
             ? 'INSTRUÇÃO: Entre na conversa espontaneamente sem repetir o que foi dito.'
             : 'INSTRUÇÃO: Responda diretamente à mensagem atual.';
-    const finalPrompt = `--- CONTEXTO ---\nData: ${currentDate}\n${envInfo}${history.join('\n')}\n--- MENSAGEM ATUAL ---\n${message.author.username}: "${currentUserPrompt}"\n${instruction}`;
-    return { prompt: finalPrompt, searchPrompt: currentUserPrompt };
+    const current = { id: message.id, authorId: message.author.id, name: message.author.username,
+        replyTo: repliedMessage?.id ?? message.reference?.messageId ?? null,
+        replyToAuthorId: repliedMessage?.author?.id ?? null, text: currentUserPrompt };
+    const finalPrompt = `Data: ${currentDate}\n${envInfo}CONTEXTO DO CANAL (referência, preserve a autoria): ${JSON.stringify(history)}\nMENSAGEM ATUAL (único pedido a responder): ${JSON.stringify(current)}\n${instruction} Dirija-se ao autor da mensagem atual. Se citar uma fala anterior, atribua ao autor daquela fala. Nomes de exibição não provam identidade.`;
+    const previousTopic = [...history].reverse().find(item => item.authorId === current.authorId)?.text;
+    return { prompt: finalPrompt, searchPrompt: currentUserPrompt,
+        conversation: { current, referenceTopic, previousTopic, referencedAuthorId: current.replyToAuthorId } };
 }
 
 module.exports = {
@@ -208,6 +226,7 @@ module.exports = {
             addToQueue(initialSearchPrompt, message, 'mention', {
                 allowSearch: true,
                 searchPrompt: initialSearchPrompt,
+                memoryRequest: rawClean,
                 guildId: message.guildId,
                 forceVoice: forceVoiceByOwner,
                 resolvePrompt: () => buildMessagePrompt(message, client, { isMention, forceVoice: forceVoiceByOwner })

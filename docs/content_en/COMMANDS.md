@@ -9,6 +9,7 @@ For `/ia_chat`, only `prompt` is required. Set `visibilidade=public` to make the
 | Command | Parameters | Behavior |
 | :--- | :--- | :--- |
 | `/ia_chat` | `prompt`, `[visibilidade=public/private]`, `[voice=true/false]` | Ask a question. Replies are private by default and can be sent as voice messages. |
+| `/memoria` | `[busca]` | Opens the private notes, trash and revision history panel. |
 | `/chat_resumo` | `[quantidade=10–100]` | Summarizes recent messages in the channel. |
 | `/ajuda` | — | Opens the interactive help menu. |
 

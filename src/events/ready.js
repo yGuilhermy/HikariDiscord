@@ -16,6 +16,7 @@ module.exports = {
         logger.event('SYSTEM', 'online', `Sessão iniciada como ${client.user.tag} (ID: ${client.user.id})`);
         logger.discord(`Conectado a ${client.guilds.cache.size} servidores e ${client.users.cache.size} usuários em cache.`);
         
+        require('../handlers/databaseHandler').startMemoryMaintenance();
         setDiscordClient(client);
         setOnQueueUpdate((queueLength) => updateBotActivity(client, queueLength));
 

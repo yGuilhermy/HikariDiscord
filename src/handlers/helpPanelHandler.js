@@ -7,6 +7,7 @@ const { commands } = require('../commands/slashCommands');
 const COMMAND_GROUPS = [
     ["Conversa e ajuda", [
         ["ia_chat", "Faça uma pergunta ou um pedido. A resposta é privada por padrão e pode ser enviada em voz."],
+        ["memoria", "Abra um painel privado para buscar, editar, excluir e restaurar anotações."],
         ["chat_resumo", "Resume as mensagens recentes do canal. A quantidade aceita vai de 10 a 100."],
         ["ajuda", "Abre este painel com a lista de comandos."],
     ]],
