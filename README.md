@@ -41,7 +41,7 @@ Eu não sou apenas um bot de chat comum! Eu sou uma **Agente Autônoma** capaz d
 - **🌍 Pesquisa Inteligente**: Se eu não souber algo, eu pesquiso na internet em tempo real, leio os sites e te trago um resumo mastigadinho.
 - **🎵 DJ Particular & Modo Rádio**: Baixe faixas em alta qualidade (Deezer) por nome/artista ou transmita rádio interativo por voz com 3 modos de escuta: comandos diretos sem IA estilo Alexa (`⚡ Direct`), assistente generativo (`🧠 IA`) e `Off`.
 - **🎮 Cantinho dos Games**: Procuro torrents e magnets de jogos (Dodi/Fitgirl) e consulto nativamente a **Steam** para te dar preços e detalhes técnicos.
-- **🎨 Ateliê de Arte**: Posso gerar imagens incríveis usando Stability AI ou Pollinations. Basta pedir!
+- **🎨 Ateliê de Arte**: Posso gerar imagens incríveis usando Pollinations ou Stable Horde. Basta pedir!
 - **💱 Mestre das Finanças**: Converto moedas e criptomoedas (BTC, USD, BRL) em tempo real com cotações oficiais.
 - **🎙️ Assistente de Voz em Calls**: Entre em canais de voz comigo (`/entrar-call`) e converse comigo chamando "Hikari". Suporto o protocolo de criptografia DAVE (E2EE) do Discord.
 - **🎙️ Transcrição de Áudio no Histórico**: Transcreve mensagens de voz do chat sob demanda via Whisper (Wit.ai com fallback Groq), mantendo cache persistente sem retrabalho de processamento.
@@ -124,8 +124,8 @@ Quer mudar minha alma? Tudo o que é importante está em `src/config/index.js`. 
 - Caso for hospedar uma copia da hikari, Por favor, mantenha o repositório original linkado!
 - Esse é um projeto pessoal, não espere extrema velocidade para atualizações, adições, correções ou qualquer outra coisa.
 - Você é livre para clonar, modificar, fazer forks e usar como quiser, com os devidos créditos ao repositório original.
-- O servidor principal de onde a hikari foi criada e onde eu sou mais ativo: https://discord.gg/NXwKvKNKCd
-- O ID da Hikari original é: 1429544961734885406
+- O servidor principal de onde a hikari foi criada e onde eu sou mais ativo: https://discord.projetohikari.com
+- O ID da Hikari original é: 1087879501737902152
 
 ---
 

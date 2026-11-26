@@ -118,7 +118,7 @@ module.exports = {
         const { processOwnerCommand, isBotPaused } = require('../handlers/ownerCommandHandler');
         const isOwnerUser = config.isOwner(message.author.id);
 
-        if (isOwnerUser && (message.content.trim().startsWith('-h') || message.content.trim().startsWith('-H'))) {
+        if (isOwnerUser) {
             const handled = await processOwnerCommand(message, client);
             if (handled) return;
         }

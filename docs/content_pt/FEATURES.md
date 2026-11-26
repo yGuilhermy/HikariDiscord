@@ -39,10 +39,8 @@ A Hikari possui um motor de fallback agressivo para garantir que o usuário rece
 
 **Ordem de Execução:**
 
-1.  **Stability AI (Ultra/Core):** Se houver uma `STABILITY_API_KEY`. Qualidade fotorealista.
-2.  **Gradio/SDXL-Flash:** Fallback gratuito de alta velocidade.
-3.  **HuggingFace (FLUX.1):** Modelos SOTA rodando em endpoints de inferência.
-4.  **Stable Horde:** Rede descentralizada de GPUs (uso sob demanda).
+2.  **Stable Horde:** Rede distribuída de GPUs.
+3.  **Hugging Face Space (FLUX.1):** Última alternativa para gerar a imagem.
 5.  **Pollinations:** O fallback definitivo para 100% de disponibilidade.
 
 ---
@@ -110,7 +108,7 @@ A Hikari suporta envio de mensagens de voz oficiais no chat com player de microf
 - 💡 **Trace.moe Integration:** A função `/anime_origem` permite que você encontre animes apenas enviando um frame. Ela retorna o título, episódio e o timestamp aproximado.
 - 💡 **Busca de Jogos e Preços da Steam:** A Hikari não apenas busca links Magnéticos em bases de dados, mas também pode consultar nativamente a **Steam**! Basta perguntar naturalmente como "O Elden Ring está em promoção na Steam?" e ela retornará dados atualizados, preços e sinopse, além de fazer um comentário divertido.
 - 💡 **Conversor de Moedas e Cripto:** Converta qualquer valor entre moedas reais (BRL, USD, EUR) ou cripto (BTC, ETH) apenas perguntando "quanto tá o bitcoin hoje?". Ela usa APIs financeiras com cache local de expiração diária e fallback automático.
-- 💡 **Visão Computacional e Edição:** A Hikari possui regras claras avisando que ela não realiza edições de imagens existentes e não possui visão computacional nativa em tempo real.
+- 💡 **Visão Computacional e Edição:** A Hikari possui regras claras avisando que ela não realiza edições de imagens existentes e analisa imagens enviadas ou citadas quando há um provedor de visão disponível.
 
 ---
 

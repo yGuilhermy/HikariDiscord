@@ -34,7 +34,7 @@ if ! command -v ffmpeg &> /dev/null; then
     echo -e "${RED}[-] ffmpeg não encontrado.${NC}"
     read -p "Deseja instalar o ffmpeg via apt? (s/n) " resp
     if [ "$resp" = "s" ]; then
-        sudo apt-get update \u0026\u0026 sudo apt-get install -y ffmpeg
+        sudo apt-get update && sudo apt-get install -y ffmpeg
     fi
 else
     echo -e "${GREEN}[+] ffmpeg detectado.${NC}"

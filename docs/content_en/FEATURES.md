@@ -39,10 +39,8 @@ Hikari has an aggressive fallback engine to ensure the user receives their art, 
 
 **Execution Order:**
 
-1.  **Stability AI (Ultra/Core):** If a `STABILITY_API_KEY` is present. Photorealistic quality.
-2.  **Gradio/SDXL-Flash:** High-speed free fallback.
-3.  **Hugging Face (FLUX.1):** SOTA models running on inference endpoints.
-4.  **Stable Horde:** Decentralized GPU network (on-demand usage).
+2.  **Stable Horde:** Distributed GPU network.
+3.  **Hugging Face Space (FLUX.1):** Final fallback for image generation.
 5.  **Pollinations:** The ultimate fallback for 100% availability.
 
 ---
@@ -110,7 +108,7 @@ Hikari supports sending official voice notes in Discord chat with the native mic
 - 💡 **Trace.moe Integration:** The `/anime_origem` function allows you to find animes just by sending a frame. It returns the title, episode, and approximate timestamp.
 - 💡 **Game Search and Steam Prices:** Hikari not only searches for Magnet links in databases but can also natively consult **Steam**! Just ask naturally, like "Is Elden Ring on sale on Steam?", and she will return updated data, prices, and a synopsis, as well as add a fun comment.
 - 💡 **Currency and Crypto Converter:** Convert any value between real currencies (BRL, USD, EUR) or crypto (BTC, ETH) just by asking "how much is bitcoin today?". She uses financial APIs with daily local caching and automatic fallback.
-- 💡 **Computer Vision & Editing:** Hikari has clear guidelines warning users that she cannot edit existing images and does not possess native computer vision in real-time.
+- 💡 **Computer Vision & Editing:** Hikari has clear guidelines warning users that she cannot edit existing images and can analyze attached or quoted images when a vision provider is available.
 
 ---
 

@@ -36,8 +36,6 @@ This guide explains each entry in the `.env` file and Hikari's internal settings
 
 ### 🎨 Image Generation
 
-- **`STABILITY_API_KEY`**: For ultra-quality image generation (SDXL/Stable Diffusion).
-  - 🔗 **Obtain from:** [Stability AI Platform](https://platform.stability.ai/account/keys)
 - **`HORDE_API_KEY`**: Key for the decentralized AI Horde network. Use `0000000000` for anonymous use with lower priority.
   - 🔗 **Obtain from:** [AI Horde Register](https://aihorde.net/register)
 
@@ -72,7 +70,7 @@ This guide explains each entry in the `.env` file and Hikari's internal settings
 - **`OWNER_ID`**: Your Discord user ID (or multiple separated by commas). This ID is the bot owner, and only they can use commands with the Owner flag.
 - **`PREFIX`**: Prefix for legacy commands (if any). Code default: `_`.
 - **`BOT_NAME`**: The name Hikari will recognize as her own.
-- **`REQUIRE_TOS`**: If `true`, new servers must accept the terms of use before using the bot. The code default is disabled.
+- **`REQUIRE_TOS`**: If `true`, new servers must accept the terms of use before using the bot. The shipped configuration and environment example enable this option.
 - **`LOG_EFFORT`**: `0` startup and essential events, `1` operational events without conversation data (default), `2` detailed diagnosis with credentials redacted.
 - **`AI_DB_READ`**: Enables reading and querying from the permanent autonomous AI database (`true`/`false`).
 - **`AI_DB_WRITE`**: Enables writing new records to the permanent database (`true`/`false`).

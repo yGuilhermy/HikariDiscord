@@ -411,7 +411,7 @@ const CONFIG_PAGES = [
         persistence: 'json',
         configKey: 'defaultAutoMod',
         summary: 'AutoMod ativo por padrão em novos servers.',
-        description: 'Define se o sistema de moderação automática (AutoMod) é ativado automaticamente quando o bot entra em um novo servidor. Se desativado, cada servidor precisará ativar manualmente via /adm_automod.',
+        description: 'Define se o sistema de moderação automática (AutoMod) é ativado automaticamente quando o bot entra em um novo servidor. Se desativado, cada servidor precisará ativar manualmente pelo painel de configuração do servidor.',
     },
     {
         key: 'automodMode',

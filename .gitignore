@@ -79,3 +79,4 @@ scratch_voice*
 src/community/
 # Testes locais da Hikari Discord
 /tests/
+/broadcast.js

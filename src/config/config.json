@@ -5,18 +5,13 @@
   "avisosWebhookUrl": "",
   "prefix": "_",
   "botName": "Hikari",
-  "ownerIds": [
-    "593372065730396160"
-  ],
-  "automodWhitelist": [
-    "593372065730396160"
-  ],
+  "ownerIds": [],
+  "automodWhitelist": [],
   "appealChannelId": "1483987324869017662",
   "requireTos": true,
   "defaultAutoMod": true,
   "automodMode": "mcp",
   "sendEnvironmentInfo": true,
-  "stabilityApiKeys": [],
   "geminiApiKeys": [],
   "hfToken": "",
   "hordeApiKey": "0000000000",

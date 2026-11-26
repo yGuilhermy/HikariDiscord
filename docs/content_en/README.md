@@ -41,7 +41,7 @@ I'm not just a common chat bot! I'm an **Autonomous Agent** capable of interacti
 - **🌍 Smart Search**: If I don't know something, I research it on the internet in real-time, read the websites, and bring you a summarized report.
 - **🎵 Personal DJ & Radio Mode**: Download high-quality music tracks (Deezer HQ MP3) by song/artist name or stream interactive voice radio with 3 listening modes: zero-AI Alexa-style direct commands (`⚡ Direct`), generative assistant (`🧠 AI`), and `Off`.
 - **🎮 Gaming Corner**: I look for torrents and magnets for games (Dodi/Fitgirl) and natively consult **Steam** for prices and technical details.
-- **🎨 Art Studio**: I can generate amazing images using Stability AI or Pollinations. Just ask!
+- **🎨 Art Studio**: I can generate amazing images using Pollinations or Stable Horde. Just ask!
 - **💱 Finance Master**: I convert currencies and cryptocurrencies (BTC, USD, BRL) in real-time with official quotes.
 - **🎙️ Voice Assistant in Calls**: Join voice channels (`/entrar-call`) and talk to me by saying "Hikari". Natively supports Discord DAVE (E2EE) protocol.
 - **🎙️ Audio Transcription in History**: Transcribes chat voice notes on-demand via Whisper (Wit.ai with Groq fallback), persistently caching transcriptions per message without redundant re-processing.
@@ -122,8 +122,8 @@ Want to change my soul? Everything important is in `src/config/index.js`. There 
 - If you're hosting a copy of Hikari, please keep the original repository linked!
 - This is a personal project; don't expect extreme speed for updates, additions, or fixes.
 - You're free to clone, modify, fork, and use as you wish, with due credit to the original repository.
-- The primary server where Hikari was created: https://discord.gg/NXwKvKNKCd
-- Original Hikari ID: 1429544961734885406
+- The primary server where Hikari was created: https://discord.projetohikari.com
+- Original Hikari ID: 1087879501737902152
 
 ---
 

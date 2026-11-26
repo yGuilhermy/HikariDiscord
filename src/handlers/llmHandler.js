@@ -248,7 +248,7 @@ function buildToolsDefinition(guildId, userId = null, options = {}) {
 }
 loadServerTools();
 const providerSettings = {
-    local:        { timeout: 1, temperature: 0.7, max_tokens: 1024, top_p: 0.9 },
+    local:        { timeout: 30000, temperature: 0.7, max_tokens: 1024, top_p: 0.9 },
     gemini:       { timeout: 60000, temperature: 0.7, max_tokens: 2048, top_p: 1.0 },
     pollinations: { timeout: 60000, temperature: 0.7, max_tokens: 1024 },
     hf:           { timeout: 60000, temperature: 0.7, max_tokens: 512 },
@@ -1610,6 +1610,7 @@ VOCÊ DEVE ADERIR A ESSA NOVA PERSONA ACIMA DE TUDO.\n`;
                         "- 'toca X', 'coloca X', 'play X', 'música X', 'som' -> radio_play_music\n" +
                         "- 'pula', 'passa', 'próxima', 'next' -> radio_next_track\n" +
                         "- 'volta', 'anterior' -> radio_prev_track\n" +
+                        "- 'toca a terceira', 'vai para a faixa 3' -> radio_skip_to com a posição pedida\n" +
                         "- 'sai', 'tchau', 'vaza', 'desconecta' -> radio_leave_call\n" +
                         "- 'fila', 'lista' -> radio_show_queue\n" +
                         "- 'embaralha', 'aleatório', 'shuffle' -> radio_toggle_shuffle\n" +
@@ -1632,6 +1633,7 @@ VOCÊ DEVE ADERIR A ESSA NOVA PERSONA ACIMA DE TUDO.\n`;
                         "  * radio_stop_music: args {}\n" +
                         "  * radio_next_track: args {}\n" +
                         "  * radio_prev_track: args {}\n" +
+                        "  * radio_skip_to: args {position: número da faixa, começando em 1}\n" +
                         "  * radio_show_queue: args {}\n" +
                         "  * radio_toggle_shuffle: args {}\n" +
                         "  * radio_set_repeat: args {}\n" +
@@ -3152,7 +3154,7 @@ Responda APENAS com texto (NÃO USE JSON/TOOLS AGORA). Seja direto e informativo
                                 if (voiceResult && voiceResult.message) {
                                     registerBotAudio(voiceResult.message.id, voiceResult.cleanText);
                                     if (voiceResult.message.attachments) {
-                                        for (const att of voiceResult.message.attachments) {
+                                        for (const att of voiceResult.message.attachments.values()) {
                                             registerBotAudio(att.id, voiceResult.cleanText);
                                         }
                                     }
@@ -3224,7 +3226,7 @@ Responda APENAS com texto (NÃO USE JSON/TOOLS AGORA). Seja direto e informativo
                 console.warn('[ANTI-ECO] Resposta inicia com eco do usuário — descartando e regenerando.');
                 processedResponse = await generateResponse(`(responda de forma diferente à mensagem): ${options.searchPrompt || prompt}`, channelId, { allowSearch: false, disableTools: true, guildId });
             }
-            const lastAssistantEntries = (conversationHistory[channelId] || []).filter(h => h.role === 'assistant').slice(-2);
+            const lastAssistantEntries = getHistory(channelId, userId).filter(h => h.role === 'assistant').slice(-2);
             if (lastAssistantEntries.length > 0) {
                 const lastClean = lastAssistantEntries[lastAssistantEntries.length - 1].content?.replace(/\n-# .*$/gm, '').trim().toLowerCase() || '';
                 const curClean = processedResponse.replace(/\n-# .*$/gm, '').trim().toLowerCase();
@@ -3256,7 +3258,17 @@ Responda APENAS com texto (NÃO USE JSON/TOOLS AGORA). Seja direto e informativo
             const isVoiceAllowed = config.voiceChatEnabled !== false && options.voice !== false && !hasNegativeVoice;
             const forceVoice = !hasNegativeVoice && Boolean((options && options.forceVoice) || options.voice === true);
 
-            if (isVoiceAllowed && forceVoice) {
+            const lastVoice = channelVoiceCooldowns.get(channelId) || 0;
+            const voiceCooldownMs = Math.max(1, Number(config.voiceCooldownMinutes) || 15) * 60000;
+            const spontaneousVoice = !forceVoice && isVoiceAllowed && type === 'mention' &&
+                Boolean(interaction.guildId && config.voiceSpontaneousEnabled) &&
+                !/https?:\/\/|```|\n-# /i.test(processedResponse) &&
+                Date.now() - lastVoice >= voiceCooldownMs &&
+                Math.random() * 100 < Math.min(100, Math.max(0, Number(config.voiceSpontaneousChance) || 0));
+
+            if (isVoiceAllowed && (forceVoice || spontaneousVoice)) {
+                const reservation = Date.now();
+                if (spontaneousVoice) channelVoiceCooldowns.set(channelId, reservation);
                 try {
                     await unifiedReply('🎙️ **Gravando voz...**');
                     const { generateAndSendVoiceMessage, synthesizeVoiceAudio } = require('../services/ttsService');
@@ -3290,7 +3302,7 @@ Responda APENAS com texto (NÃO USE JSON/TOOLS AGORA). Seja direto e informativo
                         if (voiceResult && voiceResult.message) {
                             registerBotAudio(voiceResult.message.id, voiceResult.cleanText);
                             if (voiceResult.message.attachments) {
-                                for (const att of voiceResult.message.attachments) {
+                                for (const att of voiceResult.message.attachments.values()) {
                                     registerBotAudio(att.id, voiceResult.cleanText);
                                 }
                             }
@@ -3305,6 +3317,12 @@ Responda APENAS com texto (NÃO USE JSON/TOOLS AGORA). Seja direto e informativo
                     }
                 } catch (vErr) {
                     console.warn('[AI/LLM] Falha ao enviar por mensagem de voz nativa, fallback para texto:', vErr.message);
+                } finally {
+                    if (sentViaVoice) channelVoiceCooldowns.set(channelId, Date.now());
+                    else if (spontaneousVoice && channelVoiceCooldowns.get(channelId) === reservation) {
+                        if (lastVoice) channelVoiceCooldowns.set(channelId, lastVoice);
+                        else channelVoiceCooldowns.delete(channelId);
+                    }
                 }
             }
 

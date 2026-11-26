@@ -15,12 +15,11 @@ Este documento aborda a arquitetura de configuração da Hikari, focando na resi
 
 ## 🔑 1. Arquitetura Multi-Token
 
-Para contornar limites de taxa (Rate Limits) impostos por provedores como Google e Stability, implementamos um sistema de **Key Rotation** no core do bot.
+Para contornar limites de taxa (Rate Limits) impostos por provedores como Google, implementamos um sistema de **Key Rotation** no core do bot.
 
 ### Provedores Suportados para Rotação:
 - **Gemini (LLM):** Definir no `.env` como `GEMINI_API_KEY=key1,key2,key3`.
   - **Lógica:** Implementada como `Ordered Retry` (Tenta a 1ª, se falhar por 429 ou erro de quota, tenta a 2ª).
-- **Stability AI (Imagens):** Definir como `STABILITY_API_KEY=key1,key2`.
   - **Lógica:** Implementada como `Random Load Balancing` (Escolhe uma das chaves aleatoriamente a cada requisição para distribuir o consumo de créditos).
 
 ---

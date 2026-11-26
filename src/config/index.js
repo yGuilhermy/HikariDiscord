@@ -9,8 +9,8 @@ const defaultValues = {
     avisosWebhookUrl: '',
     prefix: '_',
     botName: 'Hikari',
-    ownerIds: ['593372065730396160'],
-    automodWhitelist: ['593372065730396160'],
+    ownerIds: [],
+    automodWhitelist: [],
     appealChannelId: '1483987324869017662',
     requireTos: false,
     keepMusicEmbed: true,
@@ -30,7 +30,6 @@ const defaultValues = {
     voiceTemperature: 0.65,
     modalTtsEndpoint: '',
     hfTtsEndpoint: '',
-    stabilityApiKeys: [],
     geminiApiKeys: [],
     hfToken: '',
     hordeApiKey: '0000000000',
@@ -67,7 +66,6 @@ const envMap = {
     DEFAULT_AUTOMOD: 'defaultAutoMod',
     AUTOMOD_MODE: 'automodMode',
     SEND_ENVIRONMENT_INFO: 'sendEnvironmentInfo',
-    STABILITY_API_KEY: 'stabilityApiKeys',
     GEMINI_API_KEY: 'geminiApiKeys',
     HF_TOKEN: 'hfToken',
     HORDE_API_KEY: 'hordeApiKey',
@@ -106,7 +104,6 @@ const placeholders = [
     'seu_client_id_aqui',
     'https://discord.com/api/webhooks/...',
     'suas_chave_gemini',
-    'sua_chave_stability',
     'seu_token_huggingface',
     'opcional'
 ];
@@ -128,7 +125,7 @@ if (fs.existsSync(configJsonPath)) {
         for (const key of Object.keys(jsonConfig)) {
             let value = jsonConfig[key];
             if (value !== undefined && value !== null) {
-                if (['ownerIds', 'automodWhitelist', 'stabilityApiKeys', 'geminiApiKeys'].includes(key) && typeof value === 'string') {
+                if (['ownerIds', 'automodWhitelist', 'geminiApiKeys'].includes(key) && typeof value === 'string') {
                     value = value.split(',').map(id => id.trim()).filter(id => id);
                 }
                 if (key === 'ytdlpExtraFlags' && typeof value === 'string') {
@@ -150,7 +147,7 @@ for (const envKey of Object.keys(envMap)) {
     if (envVal !== undefined && !isInvalidEnvValue(envVal)) {
         const configKey = envMap[envKey];
         let parsedVal = envVal.trim();
-        if (['ownerIds', 'automodWhitelist', 'stabilityApiKeys', 'geminiApiKeys'].includes(configKey)) {
+        if (['ownerIds', 'automodWhitelist', 'geminiApiKeys'].includes(configKey)) {
             parsedVal = envVal.split(',').map(id => id.trim()).filter(id => id);
         } else if (configKey === 'ytdlpExtraFlags') {
             parsedVal = envVal.split(' ').map(f => f.trim()).filter(f => f);
@@ -187,10 +184,6 @@ const config = {
     isAutomodWhitelisted: function(id) {
         if (!id) return false;
         return this.automodWhitelist.includes(String(id));
-    },
-    getStabilityKey: function() {
-        if (!this.stabilityApiKeys.length) return '';
-        return this.stabilityApiKeys[Math.floor(Math.random() * this.stabilityApiKeys.length)];
     },
     getGeminiKey: function() {
         if (!this.geminiApiKeys.length) return '';

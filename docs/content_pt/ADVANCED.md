@@ -40,7 +40,7 @@ O ecossistema MCP da Hikari foi robustamente aprimorado com comportamentos nativ
 - **Embed de Lista:** A ferramenta pode retornar uma lista interativa de jogos encontrados, permitindo que a IA apresente uma seleção para o usuário escolher em vez de enviar diretamente o Torrent.
 
 ### 3. Geração de Imagens (`generate_image`)
-- **Transparência de Limitações:** A IA agora é instruída a recusar pedidos de edição de imagens e deixar claro que não possui visão computacional nativa em tempo real ao usar a ferramenta.
+- **Transparência de Limitações:** A IA agora é instruída a recusar pedidos de edição de imagens e explicar quando a visão computacional está indisponível nativa em tempo real ao usar a ferramenta.
 
 ### 4. Downloader de Mídia (`download_video`, `download_audio` & `search_and_download_music`)
 - **Direcionamento Inteligente:** A IA identifica a intenção do usuário sobre baixar vídeo ou áudio. Caso o pedido seja ambíguo, a IA faz perguntas de esclarecimento ao usuário no chat em vez de disparar a ferramenta às cegas. O MCP não inicia processos de compressão; essa decisão fica a cargo do Discord e do usuário via botões.

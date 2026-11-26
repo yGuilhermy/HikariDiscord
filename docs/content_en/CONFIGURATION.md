@@ -15,12 +15,11 @@ This document covers Hikari's configuration architecture, focusing on API resili
 
 ## 🔑 1. Multi-Token Architecture
 
-To bypass rate limits imposed by providers such as Google and Stability, we implemented a **Key Rotation** system in the bot's core.
+To bypass rate limits imposed by providers such as Google, we implemented a **Key Rotation** system in the bot's core.
 
 ### Supported Providers for Rotation:
 - **Gemini (LLM):** Define in `.env` as `GEMINI_API_KEY=key1,key2,key3`.
   - **Logic:** Implemented as `Ordered Retry` (Tries the 1st key; if it fails due to 429 or quota error, it tries the 2nd).
-- **Stability AI (Images):** Define as `STABILITY_API_KEY=key1,key2`.
   - **Logic:** Implemented as `Random Load Balancing` (Randomly chooses one of the keys for each request to distribute credit consumption).
 
 ---

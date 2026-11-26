@@ -316,7 +316,10 @@ async function handleHelp(message) {
 
 async function processOwnerCommand(message, client) {
     if (!message?.content || typeof message.content !== 'string') return false;
-    const content = message.content.trim();
+    const original = message.content.trim();
+    const prefix = String(config.prefix || '_');
+    const content = original.startsWith(prefix) && /^h/i.test(original.slice(prefix.length))
+        ? '-' + original.slice(prefix.length) : original;
     if (!content.startsWith('-h') && !content.startsWith('-H')) return false;
 
     if (!config.isOwner(message.author.id)) {
