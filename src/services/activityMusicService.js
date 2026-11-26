@@ -50,127 +50,127 @@ const PLATFORM_PRIORITY = [
     },
 ];
 
-async function resolveMember(userId, client, preferGuildId = null) {
-    if (!userId) return null;
-    const rawInput = String(userId).trim();
-    const idMatch = rawInput.match(/\d{17,20}/);
-    const targetId = idMatch ? idMatch[0] : null;
-    const cleanName = rawInput.replace(/^[<@!>]+|[>]+$/g, '').toLowerCase().trim();
 
-    let candidateMember = null;
+function memberId(member) {
+    return member?.id || member?.user?.id;
+}
 
-    if (preferGuildId) {
-        const guild = client.guilds.cache.get(preferGuildId);
-        if (guild) {
-            try {
-                if (targetId) {
-                    const member = await guild.members.fetch({ user: targetId, force: true, withPresences: true }).catch(() => null);
-                    if (member) {
-                        if (member.presence && member.presence.status !== 'offline') return member;
-                        candidateMember = member;
-                    }
-                } else if (cleanName) {
-                    let member = guild.members.cache.find(m =>
-                        m.user?.username?.toLowerCase() === cleanName ||
-                        m.displayName?.toLowerCase() === cleanName ||
-                        m.user?.globalName?.toLowerCase() === cleanName
-                    );
-                    if (!member) {
-                        const searchResults = await guild.members.search({ query: cleanName, limit: 5 }).catch(() => null);
-                        if (searchResults && searchResults.size > 0) {
-                            member = searchResults.find(m =>
-                                m.user?.username?.toLowerCase() === cleanName ||
-                                m.displayName?.toLowerCase() === cleanName
-                            ) || searchResults.first();
-                        }
-                    }
-                    if (member) {
-                        if (member.presence && member.presence.status !== 'offline') return member;
-                        candidateMember = member;
-                    }
-                }
-            } catch (_) {}
+function readNameMatches(members, name) {
+    const username = [];
+    const displayName = [];
+    for (const member of members.values ? members.values() : members) {
+        if (member.user?.username?.toLowerCase() === name) username.push(member);
+        else if (member.displayName?.toLowerCase() === name || member.user?.globalName?.toLowerCase() === name) {
+            displayName.push(member);
+        }
+    }
+    return username.length ? username : displayName;
+}
+
+async function resolveMember(rawInput, client, guildId, requesterId) {
+    const target = String(rawInput || '').trim();
+    const id = target.match(/^(?:<@!?(\d{17,20})>|(\d{17,20}))$/)?.slice(1).find(Boolean);
+    const guilds = client?.guilds?.cache;
+    if (!guilds || !target) return {};
+    if (!guildId) {
+        if (!id || id !== requesterId) return {};
+        let fallback;
+        for (const guild of guilds.values()) {
+            const members = guild.members.cache;
+            const member = members.get?.(id) || members.find?.(candidate => memberId(candidate) === id);
+            if (!member) continue;
+            if (member.presence?.status && member.presence.status !== 'offline') return { member };
+            fallback ||= member;
+        }
+        return { member: fallback };
+    }
+
+    const guild = guilds.get(guildId);
+    if (!guild) return {};
+    if (id) {
+        const cached = guild.members.cache.get?.(id);
+        const fetched = cached?.presence ? null : await guild.members.fetch({ user: id, withPresences: true }).catch(() => null);
+        const member = fetched || cached;
+        return id === memberId(member) ? { member } : {};
+    }
+
+    const name = target.replace(/^@/, '').toLowerCase().trim();
+    if (!name) return {};
+    const local = readNameMatches(guild.members.cache, name);
+    const candidates = new Map(local.map(member => [memberId(member), member]));
+    if (!local.some(member => member.user?.username?.toLowerCase() === name)) {
+        const searched = await guild.members.search({ query: name, limit: 20 }).catch(() => null);
+        if (searched) {
+            for (const member of readNameMatches(searched, name)) candidates.set(memberId(member), member);
         }
     }
 
-    for (const guild of client.guilds.cache.values()) {
-        if (preferGuildId && guild.id === preferGuildId) continue;
-        try {
-            if (targetId) {
-                const member = await guild.members.fetch({ user: targetId, force: true, withPresences: true }).catch(() => null);
-                if (member) {
-                    if (member.presence && member.presence.status !== 'offline') return member;
-                    if (!candidateMember) candidateMember = member;
-                }
-            } else if (cleanName) {
-                const member = guild.members.cache.find(m =>
-                    m.user?.username?.toLowerCase() === cleanName ||
-                    m.displayName?.toLowerCase() === cleanName ||
-                    m.user?.globalName?.toLowerCase() === cleanName
-                );
-                if (member) {
-                    if (member.presence && member.presence.status !== 'offline') return member;
-                    if (!candidateMember) candidateMember = member;
-                }
-            }
-        } catch (_) {}
-    }
-    return candidateMember;
+    const exact = readNameMatches(candidates, name);
+    if (exact.length !== 1) return { ambiguous: exact.length > 1 };
+    const member = exact[0];
+    if (member.presence || !memberId(member)) return { member };
+    const refreshed = await guild.members.fetch({ user: memberId(member), withPresences: true }).catch(() => null);
+    return { member: memberId(refreshed) === memberId(member) ? refreshed : member };
 }
 
-async function getCurrentMusicFromUser(userId, client, preferGuildId = null) {
-    const member = await resolveMember(userId, client, preferGuildId);
+function cleanText(value, maximum) {
+    return typeof value === 'string' ? value.replace(/[\r\n\t]+/g, ' ').trim().slice(0, maximum) : '';
+}
 
+function safeCover(url) {
+    try {
+        const cover = new URL(url);
+        return cover.protocol === 'https:' && !cover.username && !cover.password && cover.href.length <= 2000
+            ? cover.href : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+async function getCurrentMusicFromUser(userId, client, guildId = null, { requesterId } = {}) {
+    const { member, ambiguous } = await resolveMember(userId, client, guildId, requesterId);
+    if (ambiguous) {
+        return { success: false, reason: 'ambiguous_member', message: 'Encontrei mais de uma pessoa com esse nome. Mencione quem você quer consultar.' };
+    }
     if (!member) {
-        const cleanName = String(userId || '').replace(/^[<@!>]+|[>]+$/g, '').trim();
-        return {
-            success: false,
-            reason: 'no_guild',
-            message: `Não consegui encontrar o usuário "${cleanName || 'desconhecido'}" em nenhum servidor compartilhado comigo.`,
-        };
+        const message = guildId
+            ? 'Não encontrei essa pessoa neste servidor. Use uma menção ou o nome de usuário exato.'
+            : 'No privado, a consulta usa sua própria atividade visível em um servidor compartilhado com a Hikari.';
+        return { success: false, reason: 'no_guild', message };
     }
 
-    const userName = member.user?.displayName || member.user?.globalName || member.user?.username || member.displayName || 'Usuário';
-
+    const userName = member.user?.globalName || member.displayName || member.user?.username || 'Usuário';
     if (!member.presence || member.presence.status === 'offline') {
         return {
             success: false,
             reason: 'no_presence',
             userName,
-            isOffline: true,
-            message: `O usuário **${userName}** está offline ou invisível no Discord. O Discord não compartilha músicas de quem está offline ou com status de atividade desativado.`,
-            helpInstructions: true,
+            isOffline: member.presence?.status === 'offline',
+            message: 'A atividade musical de ' + userName + ' não está visível para mim neste momento.',
+            helpInstructions: true
         };
     }
 
     const activities = member.presence.activities || [];
-
     for (const platform of PLATFORM_PRIORITY) {
         const activity = activities.find(a => platform.match(a));
         if (!activity) continue;
 
         const data = platform.extract(activity);
-        if (!data.title) continue;
-
-        const artistName = data.artist || 'Artista desconhecido';
-        const platformLabel = platform.label || 'Outros';
-
-        const searchQuery = [data.title, data.artist].filter(Boolean).join(' ');
+        const title = cleanText(data.title, 150);
+        if (!title) continue;
+        const artist = cleanText(data.artist, 130);
         return {
             success: true,
             platform: platform.id,
-            platformLabel,
+            platformLabel: platform.label,
             platformEmoji: platform.emoji,
-            title: data.title,
-            artist: artistName,
-            album: data.album || null,
-            coverUrl: data.coverUrl || null,
-            targetUser: {
-                id: member.user?.id || member.id,
-                username: member.user?.username || userName,
-                displayName: userName,
-            },
-            searchQuery,
+            title,
+            artist: artist || 'Artista desconhecido',
+            album: cleanText(data.album, 150) || null,
+            coverUrl: safeCover(data.coverUrl),
+            targetUser: { id: memberId(member), username: member.user?.username || userName, displayName: userName },
+            searchQuery: [title, artist].filter(Boolean).join(' ')
         };
     }
 
@@ -178,8 +178,8 @@ async function getCurrentMusicFromUser(userId, client, preferGuildId = null) {
         success: false,
         reason: 'no_music',
         userName,
-        message: `O usuário **${userName}** está online, mas não está ouvindo nenhuma música no momento (Spotify ou YouTube Music).`,
-        helpInstructions: true,
+        message: 'Não encontrei uma atividade musical visível agora.',
+        helpInstructions: true
     };
 }
 

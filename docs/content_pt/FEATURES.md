@@ -53,10 +53,10 @@ Implementamos um sistema completo de download e manipulação de mídia via `you
 
 - **Suporte Multplataforma:** O bot suporta download de áudio e vídeo de plataformas populares, como YouTube (geral para áudio, apenas Shorts para vídeo), Instagram Reels e TikTok (incluindo subdomínios como `vt.tiktok.com`).
 - **Download Inteligente de Áudio:** Extração apenas do melhor stream de áudio (`bestaudio`) via `yt-dlp` e conversão dinâmica com `ffmpeg` para MP3.
-- **Motor de Música Deezer HQ (100% Deezer):** Módulo dedicado (`deezerMusicService.js` / `deezerMusicHandler.js`) para buscar e baixar áudios de estúdio em altíssima qualidade (HQ MP3 / 320kbps) via `deemix`. Possui algoritmo de fidelidade por palavras-chave e exibe um menu interativo de seleção de 5 opções quando a busca for ambígua. Todos os arquivos MP3 são temporários e removidos do disco imediatamente após o envio.
+- **Música do Deezer:** busca título e artista e abre um seletor quando há versões parecidas. O formato e o bitrate dependem da faixa disponível.
 - **Download de Vídeo com Metadados:** Ao baixar vídeos, a Hikari pode extrair o uploader original e a descrição para exibição rica no chat, configurável via parâmetro.
-- **Compressão Inteligente:** Se o arquivo de vídeo ultrapassar o limite de upload do servidor (detectado dinamicamente: 25MB para padrão, 50MB para Boost Nível 2 e 100MB para Boost Nível 3), o usuário recebe a opção de iniciar a compressão.
-- **Fila Global & Proteção da Host:** O processo de compressão FFMPEG roda em uma fila global (apenas uma compressão simultânea) para preservar os recursos da VPS. Há um monitor de RAM ativo: se o uso de memória passar de 95%, a compressão é cancelada imediatamente para evitar travamento do servidor.
+- **Compressão de vídeo:** o bot lê o limite de anexo da interação. Quando o arquivo não cabe, o botão permite tentar compressão para esse limite.
+- **Fila de compressão:** um vídeo por vez, com prazo de processamento e opção de tentar novamente em caso de falha temporária.
 - **Limitação de Uso:** Há uma limitação estrita de 1 download/processo ativo por usuário ao mesmo tempo para evitar sobrecarga.
 - **Cleanup Automático:** Todos os arquivos temporários são deletados após o envio. Vídeos grandes que aguardam compressão expiram após 6 horas.
 

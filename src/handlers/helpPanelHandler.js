@@ -17,7 +17,7 @@ const COMMAND_GROUPS = [
         ["baixar_musica", "Extrai o áudio em MP3 de um link de vídeo compatível."],
         ["baixar_musica_deezer", "Busca e baixa uma faixa no Deezer pelo nome da música ou do artista."],
         ["baixar_musica_atual", "Identifica a música pela atividade do Discord, como Spotify ou YouTube Music, e procura a faixa para baixar."],
-        ["baixar_video", "Baixa um vídeo em MP4 e ajusta a compressão para o limite de envio. A opção descricao liga a exibição da descrição."],
+        ["baixar_video", "Baixa o vídeo em MP4. Se passar do limite de envio, oferece um botão de compressão."],
     ]],
     ["Jogos e câmbio", [
         ["buscar_jogo", "Busca jogos pelo nome nos catálogos locais DODI e FitGirl."],

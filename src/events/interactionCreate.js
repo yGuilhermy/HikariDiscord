@@ -25,22 +25,10 @@ const {
 } = require('../handlers/llmHandler');
 const { generateImage } = require('../handlers/imageHandler');
 const {
-    downloadAudio,
-    downloadVideo,
-    sanitizeFilenameForDiscord,
-    isUserBusy,
-    lockUser,
-    unlockUser,
-    canBypass,
-    storeVideoForCompression,
-    getPendingVideo,
-    removePendingVideo,
-    enqueueCompression,
-    isCompressionActive,
-    getMemoryUsagePercent,
-    logCompressionAction,
-    formatVideoSuccessMessage
+    acquireMediaRequest, reserveVideoCompression, compressPendingVideo, releasePendingVideo,
+    isCompressionActive, compressionButton, getAttachmentLimit, mediaScope, playableAttachment, formatMediaError
 } = require('../handlers/youtubeAudioHandler');
+const { deliverMediaLink, deliverMusicResult, musicOptions, musicActivityEmbed, retryMediaEdit } = require('../handlers/mediaReply');
 const { executeGameCommand } = require('../handlers/gameHandler');
 const { handleSauceCommand } = require('../handlers/sauceHandler');
 const { getSteamGameInfo } = require('../handlers/steamHandler');
@@ -163,40 +151,30 @@ module.exports = {
                 return await handleRadioSelectRemove(interaction, client);
             }
             if (interaction.customId.startsWith('music_select_')) {
-                const banInfo = checkBan(interaction.user.id, interaction.guildId, interaction.channelId);
-                if (banInfo) {
-                    return interaction.reply({ content: '🛑 **ACESSO NEGADO:** Você está banido do sistema e não pode interagir.', ephemeral: true });
+                const { user, guildId, channelId } = interaction;
+                if (checkBan(user.id, guildId, channelId)) {
+                    return interaction.reply({ content: 'Acesso aos downloads negado.', flags: MessageFlags.Ephemeral });
                 }
-                const targetUserId = interaction.customId.replace('music_select_', '');
-                if (interaction.user.id !== targetUserId) {
-                    return interaction.reply({ content: '❌ Esta seleção pertence a outro usuário.', ephemeral: true });
-                }
-                const selectedIndex = interaction.values[0];
-                await interaction.update({ content: '🔄 **Processando download da faixa selecionada...**', embeds: [], components: [] });
-                const result = await handleMusicSearchAndDownload(null, selectedIndex, {
-                    user: interaction.user,
-                    userId: interaction.user.id,
-                    userTag: interaction.user.tag,
-                    guild: interaction.guild
-                });
-                if (result.error) {
-                    return await interaction.editReply({ content: `❌ ${result.error}` });
-                }
-                if (result.success) {
-                    const keepEmbed = config.keepMusicEmbed !== false;
-                    const replyPayload = {
-                        content: `✅ Música baixada: \`${result.track.title} - ${result.track.artist}\``,
-                        files: [result.attachment],
-                    };
-                    if (keepEmbed && result.infoEmbed) {
-                        replyPayload.embeds = [result.infoEmbed];
+                let request;
+                try {
+                    request = acquireMediaRequest(user.id);
+                    await interaction.deferUpdate();
+                    const result = await handleMusicSearchAndDownload(null, interaction.values[0], {
+                        ...musicOptions(interaction, user.id, request.signal),
+                        searchId: interaction.customId.slice('music_select_'.length)
+                    });
+                    if (result.error && !result.consumed) {
+                        return interaction.followUp({ content: result.error, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } }).catch(() => {});
                     }
-                    await interaction.editReply(replyPayload);
-                    if (typeof result.cleanup === 'function') {
-                        result.cleanup();
+                    return await deliverMusicResult(result, payload => interaction.editReply(payload), request.signal);
+                } catch (error) {
+                    if (interaction.deferred) {
+                        return interaction.editReply({ content: formatMediaError(error), embeds: [], components: [] });
                     }
+                    return interaction.reply({ content: formatMediaError(error), flags: MessageFlags.Ephemeral });
+                } finally {
+                    request?.release();
                 }
-                return;
             }
             if (interaction.customId === 'cfgpanel_goto_select') {
                 if (!config.isOwner(interaction.user.id)) {
@@ -240,16 +218,14 @@ module.exports = {
                 return await handleRadioButton(interaction, client);
             }
             if (cid.startsWith('music_cancel_')) {
-                const banInfo = checkBan(interaction.user.id, interaction.guildId, interaction.channelId);
-                if (banInfo) {
-                    return interaction.reply({ content: '🛑 **ACESSO NEGADO:** Você está banido do sistema e não pode interagir.', ephemeral: true });
+                if (checkBan(interaction.user.id, interaction.guildId, interaction.channelId)) {
+                    return interaction.reply({ content: 'Acesso aos downloads negado.', flags: MessageFlags.Ephemeral });
                 }
-                const targetUserId = cid.replace('music_cancel_', '');
-                if (interaction.user.id !== targetUserId) {
-                    return interaction.reply({ content: '❌ Esta ação pertence a outro usuário.', ephemeral: true });
-                }
-                clearSession(interaction.user.id);
-                return await interaction.update({ content: '❌ **Pesquisa de música cancelada.**', embeds: [], components: [] });
+                const cleared = clearSession(interaction.user.id, {
+                    ...mediaScope(interaction, interaction.user.id), searchId: cid.slice('music_cancel_'.length)
+                });
+                if (!cleared) return interaction.reply({ content: 'Esta seleção expirou ou pertence a outro pedido.', flags: MessageFlags.Ephemeral });
+                return interaction.update({ content: 'Pesquisa cancelada.', embeds: [], components: [] });
             }
             if (cid.startsWith('cfgpanel_')) {
                 if (!config.isOwner(interaction.user.id)) {
@@ -339,49 +315,36 @@ module.exports = {
             }
 
             if (cid.startsWith('compress_video_')) {
-                const fileId = cid.replace('compress_video_', '');
-                const pending = getPendingVideo(fileId);
-                if (!pending) {
-                    return interaction.reply({ content: '⏰ Este vídeo já expirou (limite de 6 horas). Faça o download novamente.', ephemeral: true });
-                }
-                const guild = interaction.guild;
-                const attachmentLimit = guild ? guild.premiumTier === 3 ? 100 * 1024 * 1024 : guild.premiumTier === 2 ? 50 * 1024 * 1024 : 25 * 1024 * 1024 : 25 * 1024 * 1024;
-                const isQueue = isCompressionActive();
-                const progressEmbed = new EmbedBuilder()
-                    .setFooter({ text: 'Hikari Media • by yGuilhermy' })
-                    .setTimestamp();
-                if (isQueue) {
-                    progressEmbed.setColor(0xF59E0B)
-                        .setTitle('⏳ Compressão na Fila')
-                        .setDescription('Já existe uma compressão de vídeo em andamento no bot. Seu vídeo foi adicionado à fila de espera e será processado automaticamente assim que a atual terminar!\n\nPor favor, aguarde...');
-                } else {
-                    progressEmbed.setColor(0x3B82F6)
-                        .setTitle('🔄 Comprimindo Vídeo...')
-                        .setDescription('Iniciando a compressão do vídeo para reduzir o tamanho do arquivo. Isso pode levar alguns minutos. Não se preocupe, estou trabalhando nisso!');
-                }
-                await interaction.update({ embeds: [progressEmbed], components: [] });
-                logCompressionAction({ user: interaction.user, guild: interaction.guild }, isQueue ? 'Fila' : 'Iniciado');
+                let entry;
+                let request;
+                let compressed;
+                const id = cid.slice('compress_video_'.length);
                 try {
-                    const result = await enqueueCompression(pending.filePath, attachmentLimit, interaction.user.id);
-                    const attachment = new AttachmentBuilder(result.filePath, { name: 'video_compressed.mp4' });
-                    const sizeMB = (result.fileSize / (1024 * 1024)).toFixed(1);
-                    await interaction.editReply({ content: `✅ **Vídeo comprimido com sucesso!** (${sizeMB} MB)`, embeds: [], files: [attachment], components: [] });
-                    logCompressionAction({ user: interaction.user, guild: interaction.guild }, 'Sucesso', `Tamanho: ${sizeMB} MB`);
-                    try { if (fs.existsSync(result.filePath)) fs.unlinkSync(result.filePath); } catch (e) {}
-                    removePendingVideo(fileId);
-                } catch (compressError) {
-                    const errorEmbed = new EmbedBuilder()
-                        .setColor(0xE11D48)
-                        .setTitle('❌ Falha na Compressão')
-                        .setFooter({ text: 'Hikari Media • by yGuilhermy' })
-                        .setTimestamp();
-                    if (compressError.message === 'MEMORY_ERROR') {
-                        errorEmbed.setDescription(`⚠️ Ocorreu um erro de falta de memória no servidor da host ao tentar comprimir o vídeo. Por favor, entre em contato com <@${config.ownerId}>.`);
+                    entry = reserveVideoCompression(id, mediaScope(interaction, interaction.user.id));
+                    request = acquireMediaRequest(interaction.user.id);
+                    const queued = isCompressionActive();
+                    await interaction.update({
+                        content: queued ? 'O vídeo entrou na fila de compressão.' : 'Comprimindo o vídeo…',
+                        embeds: [], components: []
+                    });
+                    compressed = await compressPendingVideo(entry, getAttachmentLimit(interaction), request.signal);
+                    await retryMediaEdit(payload => interaction.editReply(payload), {
+                        content: '✅ Vídeo comprimido (' + (compressed.fileSize / 1048576).toFixed(1) + ' MiB).',
+                        embeds: [], components: [], files: [playableAttachment(compressed, 'video')]
+                    }, request.signal);
+                    releasePendingVideo(entry, { discard: true });
+                } catch (error) {
+                    const discard = ['TOO_LARGE', 'FORMAT_UNAVAILABLE', 'VIDEO_EXPIRED'].includes(error.code);
+                    const retry = entry && releasePendingVideo(entry, { discard });
+                    const content = formatMediaError(error);
+                    if (interaction.replied || interaction.deferred) {
+                        await interaction.editReply({ content, embeds: [], components: retry ? [compressionButton(id)] : [] });
                     } else {
-                        errorEmbed.setDescription(`❌ Ocorreu um erro ao comprimir o vídeo: ${compressError.message}`);
+                        await interaction.reply({ content, flags: MessageFlags.Ephemeral });
                     }
-                    await interaction.editReply({ embeds: [errorEmbed], components: [] });
-                    logCompressionAction({ user: interaction.user, guild: interaction.guild }, 'Erro', `Detalhe: ${compressError.message}`);
+                } finally {
+                    compressed?.cleanup();
+                    request?.release();
                 }
                 return;
             }
@@ -617,136 +580,29 @@ module.exports = {
                     .setDescription(error.message);
                 await interaction.editReply({ embeds: [errEmbed] });
             }
-        } else if (commandName === 'baixar_musica') {
-            const videoUrl = interaction.options.getString('url');
-            const userId = interaction.user.id;
-            if (!canBypass(userId) && isUserBusy(userId)) {
-                const waitEmbed = new EmbedBuilder()
-                    .setColor(0xF59E0B)
-                    .setTitle('⏳ Download em Andamento')
-                    .setDescription('Você já tem um download em execução. Por favor, aguarde ele terminar.');
-                return interaction.reply({ embeds: [waitEmbed], ephemeral: true });
-            }
-            await interaction.deferReply({ ephemeral: false });
-            lockUser(userId);
-            let downloadedAudioInfo = null;
+        } else if (['baixar_musica', 'baixar_video', 'baixar_musica_deezer'].includes(commandName)) {
+            let request;
             try {
-                downloadedAudioInfo = await downloadAudio(videoUrl, { source: 'Slash', user: interaction.user, guild: interaction.guild });
-                if (downloadedAudioInfo && downloadedAudioInfo.filePath) {
-                    const { filePath, metadata } = downloadedAudioInfo;
-                    const displayFileName = sanitizeFilenameForDiscord(metadata.title || 'audio');
-                    const attachment = new AttachmentBuilder(filePath, { name: `${displayFileName}.mp3` });
-                    await interaction.editReply({ content: `🎵 Áudio baixado: \`${metadata.title}\``, files: [attachment] });
+                const userId = interaction.user.id;
+                request = acquireMediaRequest(userId);
+                await interaction.deferReply();
+                const send = payload => interaction.editReply(payload);
+                if (commandName === 'baixar_musica_deezer') {
+                    const result = await handleMusicSearchAndDownload(interaction.options.getString('nome'), null,
+                        musicOptions(interaction, userId, request.signal));
+                    await deliverMusicResult(result, send, request.signal);
                 } else {
-                    const errEmbed = new EmbedBuilder()
-                        .setColor(0xE11D48)
-                        .setTitle('❌ Falha no Download')
-                        .setDescription('Não consegui baixar o áudio.');
-                    await interaction.editReply({ embeds: [errEmbed] });
+                    const video = commandName === 'baixar_video';
+                    await deliverMediaLink(interaction, userId, video ? 'video' : 'audio',
+                        interaction.options.getString('url'), video && interaction.options.getBoolean('descricao'),
+                        send, request.signal);
                 }
             } catch (error) {
-                console.error('[BaixarMusica]', error);
-                const errEmbed = new EmbedBuilder()
-                    .setColor(0xE11D48)
-                    .setTitle('❌ Erro')
-                    .setDescription(error.message);
-                await interaction.editReply({ embeds: [errEmbed] });
+                const payload = { content: '❌ ' + formatMediaError(error), embeds: [], components: [] };
+                if (interaction.deferred) await interaction.editReply(payload);
+                else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
             } finally {
-                unlockUser(userId);
-                if (downloadedAudioInfo && downloadedAudioInfo.filePath && fs.existsSync(downloadedAudioInfo.filePath)) {
-                    fs.unlink(downloadedAudioInfo.filePath, () => {});
-                }
-            }
-        } else if (commandName === 'baixar_musica_deezer') {
-            const query = interaction.options.getString('nome');
-            const userId = interaction.user.id;
-            if (!canBypass(userId) && isUserBusy(userId)) {
-                const waitEmbed = new EmbedBuilder()
-                    .setColor(0xF59E0B)
-                    .setTitle('⏳ Download em Andamento')
-                    .setDescription('Você já tem um download em execução. Por favor, aguarde ele terminar.');
-                return interaction.reply({ embeds: [waitEmbed], ephemeral: true });
-            }
-            await interaction.deferReply({ ephemeral: false });
-            lockUser(userId);
-            try {
-                const result = await handleMusicSearchAndDownload(query, null, {
-                    user: interaction.user,
-                    userId: interaction.user.id,
-                    userTag: interaction.user.tag,
-                    guild: interaction.guild
-                });
-
-                if (result.error) {
-                    await interaction.editReply({ content: `❌ ${result.error}` });
-                } else if (result.isAmbiguous) {
-                    await interaction.editReply({ content: '', embeds: [result.embed], components: result.components });
-                } else if (result.success) {
-                    await interaction.editReply({
-                        content: `✅ Música em alta qualidade baixada via Deezer: \`${result.track.title} - ${result.track.artist}\``,
-                        files: [result.attachment]
-                    });
-                    if (typeof result.cleanup === 'function') {
-                        result.cleanup();
-                    }
-                }
-            } catch (error) {
-                console.error('[BaixarMusicaDeezer]', error);
-                const errEmbed = new EmbedBuilder()
-                    .setColor(0xE11D48)
-                    .setTitle('❌ Erro')
-                    .setDescription(error.message);
-                await interaction.editReply({ embeds: [errEmbed] });
-            } finally {
-                unlockUser(userId);
-            }
-        } else if (commandName === 'baixar_video') {
-            const videoUrl = interaction.options.getString('url');
-            const showDetails = interaction.options.getBoolean('descricao') || false;
-            const userId = interaction.user.id;
-            if (!canBypass(userId) && isUserBusy(userId)) {
-                const waitEmbed = new EmbedBuilder()
-                    .setColor(0xF59E0B)
-                    .setTitle('⏳ Download em Andamento')
-                    .setDescription('Você já tem um download em execução. Por favor, aguarde ele terminar.');
-                return interaction.reply({ embeds: [waitEmbed], ephemeral: true });
-            }
-            await interaction.deferReply({ ephemeral: false });
-            lockUser(userId);
-            try {
-                const videoData = await downloadVideo(videoUrl, { source: 'Slash', user: interaction.user, guild: interaction.guild });
-                const guild = interaction.guild;
-                const attachmentLimit = guild ? guild.premiumTier === 3 ? 100 * 1024 * 1024 : guild.premiumTier === 2 ? 50 * 1024 * 1024 : 25 * 1024 * 1024 : 25 * 1024 * 1024;
-                if (videoData.fileSize <= attachmentLimit) {
-                    const displayFileName = sanitizeFilenameForDiscord(videoData.metadata.title || 'video');
-                    const attachment = new AttachmentBuilder(videoData.filePath, { name: `${displayFileName}.mp4` });
-                    const sizeMB = (videoData.fileSize / (1024 * 1024)).toFixed(1);
-                    await interaction.editReply({ content: formatVideoSuccessMessage(videoData, showDetails), files: [attachment] });
-                    try { if (fs.existsSync(videoData.filePath)) fs.unlinkSync(videoData.filePath); } catch (e) {}
-                } else {
-                    const fileId = storeVideoForCompression(videoData.filePath);
-                    const sizeMB = (videoData.fileSize / (1024 * 1024)).toFixed(1);
-                    const limitMB = (attachmentLimit / (1024 * 1024)).toFixed(0);
-                    const compressEmbed = new EmbedBuilder()
-                        .setColor(0xF39C12)
-                        .setTitle('📦 Vídeo Grande Demais')
-                        .setDescription(`O vídeo **${videoData.metadata.title}** tem **${sizeMB} MB**, mas o limite deste servidor é **${limitMB} MB**.\n\nClique no botão abaixo para tentar comprimir o vídeo automaticamente.\n\n⏰ *O arquivo ficará disponível por 6 horas.*`)
-                        .setFooter({ text: 'Hikari Media • by yGuilhermy' })
-                        .setTimestamp();
-                    const row = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId(`compress_video_${fileId}`).setLabel('🔄 Tentar Compressão').setStyle(ButtonStyle.Primary)
-                    );
-                    await interaction.editReply({ embeds: [compressEmbed], components: [row] });
-                }
-            } catch (error) {
-                console.error('[BaixarVideo]', error);
-                const errEmbed = new EmbedBuilder()
-                    .setColor(0xE11D48)
-                    .setTitle('❌ Erro')
-                    .setDescription(error.message);
-                await interaction.editReply({ embeds: [errEmbed] });
-            } finally {
-                unlockUser(userId);
+                request?.release();
             }
         } else if (commandName === 'buscar_jogo') {
             await executeGameCommand(interaction);
@@ -1019,67 +875,26 @@ module.exports = {
                 await interaction.editReply({ content: '❌ Erro ao iniciar o Modo Híbrido.' });
             }
         } else if (commandName === 'baixar_musica_atual') {
-            await interaction.deferReply();
+            let request;
             try {
-                const targetInput = interaction.options.getString('usuario') || interaction.user.id;
-                const musicInfo = await getCurrentMusicFromUser(targetInput, client, interaction.guildId);
-                if (!musicInfo.success) {
-                    let msg = `🎵 ${musicInfo.message}`;
-                    if (musicInfo.isOffline) {
-                        msg += '\n\n> 💡 **Dica:** Para exibir músicas no status, o usuário precisa estar **Online** com a opção **"Exibir atividade atual como mensagem de status"** ativa no Discord.';
-                    } else if (musicInfo.helpInstructions || musicInfo.reason === 'no_presence') {
-                        msg += '\n\n> **Como ativar:**\n> Vá em **Configurações do Discord → Privacidade e Segurança → Atividade de Status** e ative **"Exibir atividade atual como mensagem de status"**.';
-                    }
-                    return await interaction.editReply({ content: msg });
-                }
-                const infoEmbed = new EmbedBuilder()
-                    .setColor(0x1DB954)
-                    .setTitle(`${musicInfo.platformEmoji} Música Identificada`)
-                    .setDescription(`**${musicInfo.title}**\n🎤 ${musicInfo.artist}${musicInfo.album ? `\n📀 ${musicInfo.album}` : ''}`)
-                    .addFields({ name: 'Plataforma', value: musicInfo.platformLabel, inline: true });
-                if (musicInfo.targetUser && musicInfo.targetUser.id !== interaction.user.id) {
-                    infoEmbed.addFields({ name: 'Usuário', value: `<@${musicInfo.targetUser.id}>`, inline: true });
-                }
-                infoEmbed.setFooter({ text: `Hikari Music • ${musicInfo.platformLabel}` }).setTimestamp();
-                if (musicInfo.coverUrl) infoEmbed.setThumbnail(musicInfo.coverUrl);
                 const userId = interaction.user.id;
-                if (!canBypass(userId) && isUserBusy(userId)) {
-                    return await interaction.editReply({ content: '⏳ Você já tem um download em andamento. Aguarde.' });
-                }
-                const keepEmbed = config.keepMusicEmbed !== false;
-                const downloadingEmbed = EmbedBuilder.from(infoEmbed);
-                if (keepEmbed) {
-                    downloadingEmbed.addFields({ name: 'Status', value: '⏳ Baixando música, aguarde...', inline: true });
-                }
-                await interaction.editReply({ embeds: [downloadingEmbed] });
-                lockUser(userId);
-                try {
-                    const musicResult = await handleMusicSearchAndDownload(
-                        musicInfo.searchQuery,
-                        null,
-                        { user: interaction.user, userId, userTag: interaction.user.tag, guild: interaction.guild }
-                    );
-                    if (musicResult.error) {
-                        await interaction.editReply({ content: `❌ ${musicResult.error}`, embeds: [] });
-                    } else if (musicResult.isAmbiguous) {
-                        await interaction.editReply({ content: musicResult.textList, components: musicResult.components, embeds: [musicResult.embed] });
-                    } else if (musicResult.success) {
-                        if (keepEmbed) {
-                            await interaction.editReply({ content: `✅ \`${musicResult.track.title} - ${musicResult.track.artist}\``, embeds: [infoEmbed], files: [musicResult.attachment] });
-                        } else {
-                            await interaction.editReply({ content: `✅ \`${musicResult.track.title} - ${musicResult.track.artist}\``, embeds: [], files: [musicResult.attachment] });
-                        }
-                        if (typeof musicResult.cleanup === 'function') musicResult.cleanup();
-                    }
-                } catch (err) {
-                    console.error('[IdentificarMusica]', err);
-                    await interaction.followUp({ content: `\u274C Erro ao baixar: ${err.message}` });
-                } finally {
-                    unlockUser(userId);
-                }
-            } catch (err) {
-                console.error('[IdentificarMusica]', err);
-                await interaction.editReply({ content: '\u274C Erro interno.' });
+                request = acquireMediaRequest(userId);
+                await interaction.deferReply();
+                const activity = await getCurrentMusicFromUser(interaction.options.getString('usuario') || userId,
+                    client, interaction.guildId, { requesterId: userId });
+                if (!activity.success) return await interaction.editReply({ content: activity.message, allowedMentions: { parse: [] } });
+                const infoEmbed = musicActivityEmbed(activity, userId);
+                await interaction.editReply({ content: 'Consultando o catálogo Deezer…', allowedMentions: { parse: [] } });
+                const result = await handleMusicSearchAndDownload(activity.searchQuery, null, {
+                    ...musicOptions(interaction, userId, request.signal), activity, infoEmbed
+                });
+                await deliverMusicResult(result, payload => interaction.editReply(payload), request.signal, infoEmbed);
+            } catch (error) {
+                const payload = { content: '❌ ' + formatMediaError(error), embeds: [], components: [] };
+                if (interaction.deferred) await interaction.editReply(payload);
+                else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
+            } finally {
+                request?.release();
             }
         }
     },

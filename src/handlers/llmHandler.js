@@ -7,17 +7,8 @@ const fs = require('fs');
 const path = require('path');
 const { smartSearch } = require('./searchManager');
 const { AttachmentBuilder, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const {
-    downloadAudio,
-    downloadVideo,
-    sanitizeFilenameForDiscord,
-    isUserBusy,
-    lockUser,
-    unlockUser,
-    canBypass,
-    storeVideoForCompression,
-    formatVideoSuccessMessage
-} = require('./youtubeAudioHandler');
+const { acquireMediaRequest, formatMediaError } = require('./youtubeAudioHandler');
+const { deliverMediaLink, deliverMusicResult, musicOptions, musicActivityEmbed } = require('./mediaReply');
 const { searchGames, getTorrentOrMagnet, createPaginationComponents, normalizeString } = require('./gameHandler');
 const { generateImage } = require('./imageHandler');
 const { getSteamGameInfo } = require('./steamHandler');
@@ -2135,7 +2126,7 @@ async function processQueueItem(queueItem) {
     console.log(`{${guildName} - ${serverIdentifier}} {${channelName} - ${channelIdentifier}}`);
     console.log(`----------------------`);
     let replyMessage = null;
-    const unifiedReply = async (content, files = [], components = [], embeds = []) => {
+    const unifiedReply = async (content, files = [], components = [], embeds = [], strict = false) => {
         if (interaction.isVoice || (interaction.id && typeof interaction.id === 'string' && interaction.id.startsWith('voice_'))) {
             const isProcessingMsg = typeof content === 'string' && content.includes('Processando...');
             if (!isProcessingMsg && content && typeof content === 'string' && !content.includes(`<@${userId}>`)) {
@@ -2162,10 +2153,55 @@ async function processQueueItem(queueItem) {
                 }
             }
         } catch (err) {
+            if (strict) throw err;
             console.error('[UnifiedReply] Erro ao responder:', err.message);
             return null;
         }
     };
+    const sendMedia = payload => unifiedReply(payload.content, payload.files, payload.components, payload.embeds, true);
+    async function runMediaTool(name, args = {}) {
+        let request;
+        try {
+            request = acquireMediaRequest(userId);
+            await sendMedia({ content: '', embeds: [progressEmbed([name])] });
+            if (name === 'download_audio' || name === 'download_video') {
+                const type = name === 'download_audio' ? 'audio' : 'video';
+                await deliverMediaLink(interaction, userId, type, args.url,
+                    args.include_description === true || args.descricao === true, sendMedia, request.signal);
+            } else {
+                const context = musicOptions(interaction, userId, request.signal);
+                let result;
+                let infoEmbed;
+                if (name === 'get_current_music') {
+                    const { getCurrentMusicFromUser } = require('../services/activityMusicService');
+                    const source = options.searchPrompt || prompt;
+                    const mention = source.match(/<@!?(\d{17,20})>/)?.[1];
+                    const self = /\b(meu|minha|eu|comigo|estou|t[oô]|me)\b/i.test(source);
+                    const target = args.user || args.user_id || args.target || (!self && mention) || userId;
+                    const activity = await getCurrentMusicFromUser(target, getDiscordClient(),
+                        options.guildId || interaction.guildId, { requesterId: userId });
+                    if (!activity.success) {
+                        await sendMedia({ content: activity.message });
+                        return;
+                    }
+                    infoEmbed = musicActivityEmbed(activity, userId);
+                    if (args.download === false) {
+                        await sendMedia({ content: '', embeds: [infoEmbed] });
+                        return;
+                    }
+                    result = await handleMusicSearchAndDownload(activity.searchQuery, null, { ...context, activity, infoEmbed });
+                } else {
+                    result = await handleMusicSearchAndDownload(args.query, args.selected_index, context);
+                }
+                await deliverMusicResult(result, sendMedia, request.signal, infoEmbed);
+            }
+        } catch (error) {
+            console.warn('[Media] Pedido não concluiu:', error.code || error.name);
+            await unifiedReply('❌ ' + formatMediaError(error));
+        } finally {
+            request?.release();
+        }
+    }
     try {
         const triggerSource = options.searchPrompt || prompt;
         const _automodMode = getAutoBlockMode(guildId);
@@ -2528,206 +2564,9 @@ Como o projeto é open-source, você pode hospedar sua própria versão e ter co
                         reportConversation(prompt, userTag, userId, `[TOOL: RADIO_MCP]`, interaction);
                         return;
                     }
-                    if (toolData.tool === 'download_audio') {
-                        const audioUserId = userId;
-                        if (!canBypass(audioUserId) && isUserBusy(audioUserId)) {
-                            await unifiedReply('⏳ Você já tem um download em andamento. Aguarde.');
-                            return;
-                        }
-                        lockUser(audioUserId);
-                        try {
-                            if (type === 'mention' && interaction.suppressEmbeds) {
-                                try { await interaction.suppressEmbeds(true); } catch (e) {}
-                            }
-                            const audioEmbed = progressEmbed(['download_audio']);
-                            await unifiedReply(null, [], [], [audioEmbed]);
-                            const audioData = await downloadAudio(toolData.args.url, { source: 'MCP', userId, userTag, guildName: interaction.guild?.name || 'DM' });
-                            if (audioData && audioData.filePath) {
-                                const { filePath, metadata } = audioData;
-                                const displayFileName = sanitizeFilenameForDiscord(metadata.title || 'audio');
-                                const attachment = new AttachmentBuilder(filePath, { name: `${displayFileName}.mp3` });
-                                await unifiedReply(`✅ Áudio: \`${metadata.title}\``, [attachment]);
-                                if (fs.existsSync(filePath)) fs.unlink(filePath, () => {});
-                            }
-                        } catch (audioError) {
-                            console.error('[DownloadAudio] Erro:', audioError.message);
-                            await unifiedReply(`❌ Erro ao baixar o áudio: ${audioError.message}`);
-                        } finally {
-                            unlockUser(audioUserId);
-                        }
-                        reportConversation(prompt, userTag, userId, `[TOOL: DOWNLOAD_AUDIO]`, interaction);
-                        return;
-                    }
-                    if (toolData.tool === 'get_current_music') {
-                        const { getCurrentMusicFromUser } = require('../services/activityMusicService');
-                        const discordClient = getDiscordClient();
-                        let targetUser = toolData.args?.user || toolData.args?.user_id || toolData.args?.target;
-                        if (!targetUser) {
-                            const mentionMatch = (options.searchPrompt || prompt).match(/<@!?(\d{17,20})>/);
-                            const selfWords = /\b(meu|minha|eu|comigo|estou|t[oô]|me)\b/i.test(options.searchPrompt || prompt);
-                            if (mentionMatch && !selfWords) {
-                                targetUser = mentionMatch[1];
-                            } else {
-                                targetUser = userId;
-                            }
-                        }
-                        const currentGuildId = options.guildId || interaction?.guildId || null;
-                        const musicInfo = await getCurrentMusicFromUser(targetUser, discordClient, currentGuildId);
-                        if (!musicInfo.success) {
-                            let msg = `🎵 ${musicInfo.message}`;
-                            if (musicInfo.isOffline) {
-                                msg += '\n\n> 💡 **Dica:** Para exibir músicas no status, o usuário precisa estar **Online** com a opção **"Exibir atividade atual como mensagem de status"** ativa no Discord.';
-                            } else if (musicInfo.helpInstructions || musicInfo.reason === 'no_presence') {
-                                msg += '\n\n> **Como ativar:**\n> Vá em **Configurações do Discord → Privacidade e Segurança → Atividade de Status** e ative a opção **"Exibir atividade atual como mensagem de status"**.';
-                            }
-                            await unifiedReply(msg);
-                            reportConversation(prompt, userTag, userId, `[TOOL: GET_CURRENT_MUSIC - FAIL:${musicInfo.reason}]`, interaction);
-                            return;
-                        }
-                        const isTargetOther = musicInfo.targetUser && musicInfo.targetUser.id !== userId;
-                        const infoEmbed = new EmbedBuilder()
-                            .setColor(0x1DB954)
-                            .setTitle(`${musicInfo.platformEmoji} Música Identificada`)
-                            .setDescription(`**${musicInfo.title}**\n🎤 ${musicInfo.artist}${musicInfo.album ? `\n💿 ${musicInfo.album}` : ''}`)
-                            .addFields({ name: 'Plataforma', value: musicInfo.platformLabel, inline: true });
-                        if (isTargetOther) {
-                            infoEmbed.addFields({ name: 'Usuário', value: `<@${musicInfo.targetUser.id}>`, inline: true });
-                        }
-                        infoEmbed.setFooter({ text: `Hikari Music • ${musicInfo.platformLabel}` })
-                            .setTimestamp();
-                        if (musicInfo.coverUrl) infoEmbed.setThumbnail(musicInfo.coverUrl);
-                        const musicUserId = userId;
-                        if (!canBypass(musicUserId) && isUserBusy(musicUserId)) {
-                            await unifiedReply('⏳ Você já tem um download em andamento. Aguarde.');
-                            return;
-                        }
-                        lockUser(musicUserId);
-                        try {
-                            const keepEmbed = config.keepMusicEmbed !== false;
-                            const downloadingEmbed = EmbedBuilder.from(infoEmbed);
-                            if (keepEmbed) {
-                                downloadingEmbed.addFields({ name: 'Status', value: '⏳ Baixando música, aguarde...', inline: true });
-                            }
-                            await unifiedReply(null, [], [], [downloadingEmbed]);
-                            const musicResult = await handleMusicSearchAndDownload(
-                                musicInfo.searchQuery,
-                                null,
-                                { user: interaction.user, userId, userTag, guild: interaction.guild, infoEmbed: keepEmbed ? infoEmbed : null, forceDownload: true }
-                            );
-                            if (musicResult.error) {
-                                await unifiedReply(`❌ ${musicResult.error}`);
-                            } else if (musicResult.isAmbiguous) {
-                                const noMatchEmbed = EmbedBuilder.from(infoEmbed)
-                                    .spliceFields(0, 25)
-                                    .addFields(
-                                        { name: 'Plataforma', value: musicInfo.platformLabel, inline: true },
-                                        { name: 'Aviso', value: '⚠️ Não encontrei um arquivo compatível. Escolha abaixo:', inline: false }
-                                    );
-                                await unifiedReply(musicResult.textList, [], musicResult.components, [noMatchEmbed]);
-                            } else if (musicResult.success) {
-                                const finalEmbed = EmbedBuilder.from(infoEmbed).spliceFields(0, 25)
-                                    .addFields({ name: 'Plataforma', value: musicInfo.platformLabel, inline: true });
-                                if (musicResult.lowConfidence) {
-                                    finalEmbed.addFields({ name: 'Aviso', value: '⚠️ Correspondência baixa — pode não ser o arquivo exato.', inline: false });
-                                }
-                                if (keepEmbed) {
-                                    await unifiedReply(`✅ \`${musicResult.track.title} - ${musicResult.track.artist}\``, [musicResult.attachment], [], [finalEmbed]);
-                                } else {
-                                    await unifiedReply(`✅ \`${musicResult.track.title} - ${musicResult.track.artist}\``, [musicResult.attachment]);
-                                }
-                                if (typeof musicResult.cleanup === 'function') musicResult.cleanup();
-                            }
-                        } catch (err) {
-                            console.error('[GetCurrentMusic] Erro:', err.message);
-                            await unifiedReply(`❌ Erro ao baixar a música: ${err.message}`);
-                        } finally {
-                            unlockUser(musicUserId);
-                        }
-                        reportConversation(prompt, userTag, userId, `[TOOL: GET_CURRENT_MUSIC - ${musicInfo.title}]`, interaction);
-                        return;
-                    }
-                    if (toolData.tool === 'search_and_download_music') {
-                        const musicUserId = userId;
-                        if (!canBypass(musicUserId) && isUserBusy(musicUserId)) {
-                            await unifiedReply('⏳ Você já tem um download em andamento. Aguarde.');
-                            return;
-                        }
-                        lockUser(musicUserId);
-                        try {
-                            const musicEmbed = progressEmbed(['search_and_download_music']);
-                            await unifiedReply(null, [], [], [musicEmbed]);
-
-                            const musicResult = await handleMusicSearchAndDownload(
-                                toolData.args.query,
-                                toolData.args.selected_index,
-                                { user: interaction.user, userId, userTag, guild: interaction.guild }
-                            );
-
-                            if (musicResult.error) {
-                                await unifiedReply(`❌ ${musicResult.error}`);
-                            } else if (musicResult.isAmbiguous) {
-                                await unifiedReply(musicResult.textList, [], musicResult.components, [musicResult.embed]);
-                            } else if (musicResult.success) {
-                                await unifiedReply(`✅ Música: \`${musicResult.track.title} - ${musicResult.track.artist}\``, [musicResult.attachment]);
-                                if (typeof musicResult.cleanup === 'function') {
-                                    musicResult.cleanup();
-                                }
-                            }
-                        } catch (musicError) {
-                            console.error('[SearchAndDownloadMusic] Erro:', musicError.message);
-                            await unifiedReply(`❌ Erro ao processar a música: ${musicError.message}`);
-                        } finally {
-                            unlockUser(musicUserId);
-                        }
-                        reportConversation(prompt, userTag, userId, `[TOOL: SEARCH_AND_DOWNLOAD_MUSIC]`, interaction);
-                        return;
-                    }
-                    if (toolData.tool === 'download_video') {
-                        const videoUserId = userId;
-                        if (!canBypass(videoUserId) && isUserBusy(videoUserId)) {
-                            await unifiedReply('⏳ Você já tem um download em andamento. Aguarde.');
-                            return;
-                        }
-                        lockUser(videoUserId);
-                        try {
-                            if (type === 'mention' && interaction.suppressEmbeds) {
-                                try { await interaction.suppressEmbeds(true); } catch (e) {}
-                            }
-                            const videoEmbed = progressEmbed(['download_video']);
-                            await unifiedReply(null, [], [], [videoEmbed]);
-                            const videoData = await downloadVideo(toolData.args.url, { source: 'MCP', userId, userTag, guildName: interaction.guild?.name || 'DM' });
-                            const guild = interaction.guild || interaction?.guild;
-                            const attachmentLimit = guild ? guild.premiumTier === 3 ? 100 * 1024 * 1024 : guild.premiumTier === 2 ? 50 * 1024 * 1024 : 25 * 1024 * 1024 : 25 * 1024 * 1024;
-                            if (videoData.fileSize <= attachmentLimit) {
-                                const displayFileName = sanitizeFilenameForDiscord(videoData.metadata.title || 'video');
-                                const attachment = new AttachmentBuilder(videoData.filePath, { name: `${displayFileName}.mp4` });
-                                const showDetails = toolData.args.include_description === true || toolData.args.descricao === true;
-                                await unifiedReply(formatVideoSuccessMessage(videoData, showDetails), [attachment]);
-                                try { if (fs.existsSync(videoData.filePath)) fs.unlinkSync(videoData.filePath); } catch (e) {}
-                            } else {
-                                const fileId = storeVideoForCompression(videoData.filePath);
-                                const sizeMB = (videoData.fileSize / (1024 * 1024)).toFixed(1);
-                                const limitMB = (attachmentLimit / (1024 * 1024)).toFixed(0);
-                                const compressEmbed = new EmbedBuilder()
-                                    .setColor(0xF59E0B)
-                                    .setTitle('📦 Vídeo Grande Demais')
-                                    .setDescription(`O vídeo **${videoData.metadata.title}** tem **${sizeMB} MB**, mas o limite deste servidor é **${limitMB} MB**.\n\nClique no botão abaixo para tentar comprimir o vídeo automaticamente.\n\n⏰ *O arquivo ficará disponível por 6 horas.*`)
-                                    .setFooter({ text: 'Hikari Media • by yGuilhermy' })
-                                    .setTimestamp();
-                                const row = new ActionRowBuilder().addComponents(
-                                    new ButtonBuilder().setCustomId(`compress_video_${fileId}`).setLabel('🔄 Tentar Compressão').setStyle(ButtonStyle.Primary)
-                                );
-                                const payload = { content: '', embeds: [compressEmbed], components: [row] };
-                                if (type === 'mention') await replyMessage.edit(payload);
-                                else await interaction.editReply(payload);
-                            }
-                        } catch (videoError) {
-                            console.error('[DownloadVideo] Erro:', videoError.message);
-                            await unifiedReply(`❌ Erro ao baixar o vídeo: ${videoError.message}`);
-                        } finally {
-                            unlockUser(videoUserId);
-                        }
-                        reportConversation(prompt, userTag, userId, `[TOOL: DOWNLOAD_VIDEO]`, interaction);
+                    if (['download_audio', 'download_video', 'search_and_download_music', 'get_current_music'].includes(toolData.tool)) {
+                        await runMediaTool(toolData.tool, toolData.args);
+                        reportConversation(prompt, userTag, userId, '[TOOL: MEDIA]', interaction);
                         return;
                     }
                     if (toolData.tool === 'search_game') {
@@ -3371,87 +3210,8 @@ Responda APENAS com texto (NÃO USE JSON/TOOLS AGORA). Seja direto e informativo
         );
 
         if (isCurrentMusicIntent) {
-            const { getCurrentMusicFromUser } = require('../services/activityMusicService');
-            const discordClient = getDiscordClient();
-            let targetUser = userId;
-            const mentionMatch = (options.searchPrompt || prompt).match(/<@!?(\d{17,20})>/);
-            const selfWords = /\b(meu|minha|eu|comigo|estou|t[oô]|me)\b/i.test(options.searchPrompt || prompt);
-            if (mentionMatch && !selfWords) {
-                targetUser = mentionMatch[1];
-            }
-            const currentGuildId = options.guildId || interaction?.guildId || null;
-            const musicInfo = await getCurrentMusicFromUser(targetUser, discordClient, currentGuildId);
-            if (!musicInfo.success) {
-                let msg = `🎵 ${musicInfo.message}`;
-                if (musicInfo.isOffline) {
-                    msg += '\n\n> 💡 **Dica:** Para exibir músicas no status, o usuário precisa estar **Online** com a opção **"Exibir atividade atual como mensagem de status"** ativa no Discord.';
-                } else if (musicInfo.helpInstructions || musicInfo.reason === 'no_presence') {
-                    msg += '\n\n> **Como ativar:**\n> Vá em **Configurações do Discord → Privacidade e Segurança → Atividade de Status** e ative a opção **"Exibir atividade atual como mensagem de status"**.';
-                }
-                await unifiedReply(msg);
-                reportConversation(prompt, userTag, userId, `[TOOL: DETERMINISTIC_GET_CURRENT_MUSIC - FAIL:${musicInfo.reason}]`, interaction);
-                return;
-            }
-            const isTargetOther = musicInfo.targetUser && musicInfo.targetUser.id !== userId;
-            const infoEmbed = new EmbedBuilder()
-                .setColor(0x1DB954)
-                .setTitle(`${musicInfo.platformEmoji} Música Identificada`)
-                .setDescription(`**${musicInfo.title}**\n🎤 ${musicInfo.artist}${musicInfo.album ? `\n💿 ${musicInfo.album}` : ''}`)
-                .addFields({ name: 'Plataforma', value: musicInfo.platformLabel, inline: true });
-            if (isTargetOther) {
-                infoEmbed.addFields({ name: 'Usuário', value: `<@${musicInfo.targetUser.id}>`, inline: true });
-            }
-            infoEmbed.setFooter({ text: `Hikari Music • ${musicInfo.platformLabel}` })
-                .setTimestamp();
-            if (musicInfo.coverUrl) infoEmbed.setThumbnail(musicInfo.coverUrl);
-            const musicUserId = userId;
-            if (!canBypass(musicUserId) && isUserBusy(musicUserId)) {
-                await unifiedReply('⏳ Você já tem um download em andamento. Aguarde.');
-                return;
-            }
-            lockUser(musicUserId);
-            try {
-                const keepEmbed = config.keepMusicEmbed !== false;
-                const downloadingEmbed = EmbedBuilder.from(infoEmbed);
-                if (keepEmbed) {
-                    downloadingEmbed.addFields({ name: 'Status', value: '⏳ Baixando música, aguarde...', inline: true });
-                }
-                await unifiedReply(null, [], [], [downloadingEmbed]);
-                const musicResult = await handleMusicSearchAndDownload(
-                    musicInfo.searchQuery,
-                    null,
-                    { user: interaction.user, userId, userTag, guild: interaction.guild, infoEmbed: keepEmbed ? infoEmbed : null, forceDownload: true }
-                );
-                if (musicResult.error) {
-                    await unifiedReply(`❌ ${musicResult.error}`);
-                } else if (musicResult.isAmbiguous) {
-                    const noMatchEmbed = EmbedBuilder.from(infoEmbed)
-                        .spliceFields(0, 25)
-                        .addFields(
-                            { name: 'Plataforma', value: musicInfo.platformLabel, inline: true },
-                            { name: 'Aviso', value: '⚠️ Não encontrei um arquivo compatível. Escolha abaixo:', inline: false }
-                        );
-                    await unifiedReply(musicResult.textList, [], musicResult.components, [noMatchEmbed]);
-                } else if (musicResult.success) {
-                    const finalEmbed = EmbedBuilder.from(infoEmbed).spliceFields(0, 25)
-                        .addFields({ name: 'Plataforma', value: musicInfo.platformLabel, inline: true });
-                    if (musicResult.lowConfidence) {
-                        finalEmbed.addFields({ name: 'Aviso', value: '⚠️ Correspondência baixa — pode não ser o arquivo exato.', inline: false });
-                    }
-                    if (keepEmbed) {
-                        await unifiedReply(`✅ \`${musicResult.track.title} - ${musicResult.track.artist}\``, [musicResult.attachment], [], [finalEmbed]);
-                    } else {
-                        await unifiedReply(`✅ \`${musicResult.track.title} - ${musicResult.track.artist}\``, [musicResult.attachment]);
-                    }
-                    if (typeof musicResult.cleanup === 'function') musicResult.cleanup();
-                }
-            } catch (err) {
-                console.error('[GetCurrentMusic] Erro:', err.message);
-                await unifiedReply(`❌ Erro ao baixar a música: ${err.message}`);
-            } finally {
-                unlockUser(musicUserId);
-            }
-            reportConversation(prompt, userTag, userId, `[TOOL: DETERMINISTIC_GET_CURRENT_MUSIC - ${musicInfo.title}]`, interaction);
+            await runMediaTool('get_current_music');
+            reportConversation(prompt, userTag, userId, '[TOOL: GET_CURRENT_MUSIC]', interaction);
             return;
         }
 
