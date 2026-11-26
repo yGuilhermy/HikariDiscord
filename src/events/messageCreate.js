@@ -138,19 +138,19 @@ module.exports = {
             const banEmbed = new EmbedBuilder()
                 .setColor(0xE11D48)
                 .setTitle('🛑 ACESSO NEGADO — VOCÊ ESTÁ BANIDO!')
-                .setDescription(`Sua tentativa de interação foi abortada. O acesso à **IA Hikari** está permanentemente bloqueado para você.\n\n**DETALHES DO SEU BANIMENTO:**\n- **ALVO:** ${banInfo.typeName || banInfo.type}\n- **MOTIVO:** ${banInfo.reason || 'Violação severa dos Termos de Uso da IA Hikari.'}\n- **STATUS:** 🔴 TOTALMENTE RESTRITO / SUSPENSO.\n\nVocê perdeu todos os privilégios de utilização dos nossos serviços.\n\nSe acredita que isso é um erro, solicite um desbanimento pelo botão abaixo.\n\n---\n💡 **Quer usar a Hikari sem restrições?** Hospede sua própria versão!\n🚀 **Repositório:** [yGuilhermy/HikariDiscord](https://github.com/yGuilhermy/HikariDiscord)`)
+                .setDescription(`Sua tentativa de interação foi abortada. O acesso à **IA Hikari** está permanentemente bloqueado para você.\n\n**DETALHES DO SEU BANIMENTO:**\n- **ALVO:** ${banInfo.typeName || banInfo.type}\n- **MOTIVO:** ${banInfo.reason || 'Violação severa dos Termos de Uso da IA Hikari.'}\n- **STATUS:** 🔴 TOTALMENTE RESTRITO / SUSPENSO.\n\nVocê perdeu todos os privilégios de utilização dos nossos serviços.\n\nSe acredita que isso é um erro, solicite um desbanimento pelo botão abaixo.\n\n---\n💡 **Quer usar a Hikari sem restrições?** Hospede sua própria versão!\n🚀 **Site oficial:** [Projeto Hikari](https://projetohikari.com/)`)
                 .setFooter({ text: 'Hikari Security & Moderation • by yGuilhermy' })
                 .setTimestamp();
             const appealButton = new ButtonBuilder()
                 .setCustomId(`appeal_ban_${banInfo.type}_${banInfo.id || message.author.id}`)
                 .setLabel('⚖️ Solicitar Apelação')
                 .setStyle(ButtonStyle.Secondary);
-            const githubButton = new ButtonBuilder()
+            const projectSiteButton = new ButtonBuilder()
                 .setLabel('Página do Projeto')
-                .setURL('https://github.com/yGuilhermy/HikariDiscord')
+                .setURL('https://projetohikari.com/')
                 .setStyle(ButtonStyle.Link)
                 .setEmoji('🚀');
-            const banRow = new ActionRowBuilder().addComponents(appealButton, githubButton);
+            const banRow = new ActionRowBuilder().addComponents(appealButton, projectSiteButton);
             return message.reply({ embeds: [banEmbed], components: [banRow] }).catch(() => {});
         }
         let isReplyToBot = false;

@@ -384,12 +384,12 @@ module.exports = {
                     .setCustomId(`appeal_ban_${banInfo.type}_${banInfo.id || interaction.user.id}`)
                     .setLabel('⚖️ Solicitar Apelação')
                     .setStyle(ButtonStyle.Secondary);
-                const githubButton = new ButtonBuilder()
+                const projectSiteButton = new ButtonBuilder()
                     .setLabel('Página do Projeto')
-                    .setURL('https://github.com/yGuilhermy/HikariDiscord')
+                    .setURL('https://projetohikari.com/')
                     .setStyle(ButtonStyle.Link)
                     .setEmoji('🚀');
-                const banRow = new ActionRowBuilder().addComponents(appealButton, githubButton);
+                const banRow = new ActionRowBuilder().addComponents(appealButton, projectSiteButton);
                 return interaction.reply({ embeds: [banEmbed], components: [banRow], ephemeral: true });
             }
         }

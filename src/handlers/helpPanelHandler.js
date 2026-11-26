@@ -86,7 +86,7 @@ function buildHelpHomePayload() {
         .setTimestamp();
 
     const linkButtons = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setLabel('🚀 GitHub').setURL('https://github.com/yGuilhermy/HikariDiscord').setStyle(ButtonStyle.Link),
+        new ButtonBuilder().setLabel('Site do Projeto').setURL('https://projetohikari.com/').setStyle(ButtonStyle.Link),
         new ButtonBuilder().setLabel('🌐 Redes Sociais').setURL('https://bio.site/yGuilhermy').setStyle(ButtonStyle.Link),
         new ButtonBuilder().setLabel('💖 Apoiar no LivePix').setURL('https://livepix.gg/yguilhermy').setStyle(ButtonStyle.Link)
     );
@@ -219,7 +219,7 @@ function buildHelpCreatorPayload() {
     const linkButtons = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setLabel('🌐 Redes Sociais do Criador').setURL('https://bio.site/yGuilhermy').setStyle(ButtonStyle.Link).setEmoji('🔗'),
         new ButtonBuilder().setLabel('💖 Apoiar no LivePix').setURL('https://livepix.gg/yguilhermy').setStyle(ButtonStyle.Link).setEmoji('🎁'),
-        new ButtonBuilder().setLabel('🚀 GitHub Open Source').setURL('https://github.com/yGuilhermy/HikariDiscord').setStyle(ButtonStyle.Link).setEmoji('⭐')
+        new ButtonBuilder().setLabel('Site do Projeto').setURL('https://projetohikari.com/').setStyle(ButtonStyle.Link).setEmoji('⭐')
     );
 
     return { embeds: [embed], components: [getMainCategorySelectMenu('sobre'), linkButtons] };

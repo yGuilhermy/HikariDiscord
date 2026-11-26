@@ -197,7 +197,7 @@ function buildTosPagePayload(pageIndex = 0, maxVisited = 0, isLegacy = false) {
             .setDisabled(safePageIndex === totalPages - 1),
         new ButtonBuilder()
             .setLabel('Página do Projeto')
-            .setURL('https://github.com/yGuilhermy/HikariDiscord')
+            .setURL('https://projetohikari.com/')
             .setStyle(ButtonStyle.Link)
             .setEmoji('📂')
     );
