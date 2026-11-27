@@ -3,6 +3,8 @@ const { checkBan } = require('../handlers/banHandler');
 const { resolveMentions } = require('../utils/mentions');
 const { addToQueue, getChannelSettings, getServerSettings, isChannelDisabled } = require('../handlers/llmHandler');
 const config = require('../config');
+const { createBotNameMatcher } = require('../utils/botNameMatcher');
+const matchesBotName = createBotNameMatcher(config.botName || 'Hikari', process.env.BOT_ALIASES ?? 'hik');
 
 async function buildMessagePrompt(message, client, options = {}) {
     const { isMention = false, isChatter = false } = options;
@@ -169,16 +171,13 @@ module.exports = {
                 }
             }
         }
+        const hasHikariName = matchesBotName(message.content);
         if (message.guildId) {
             const { isServerAccepted, sendTermsOfService } = require('../handlers/tosHandler');
             if (!isServerAccepted(message.guildId)) {
                 const serverSettings = getServerSettings(message.guildId);
                 const respondToEveryone = serverSettings.respondToEveryone || false;
                 const isMention = message.mentions.has(client.user, { ignoreEveryone: true }) || (respondToEveryone && message.mentions.everyone);
-                const botName = config.botName || 'Hikari';
-                const escapedBotName = botName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                const nameRegex = new RegExp(`\\b${escapedBotName}\\b`, 'i');
-                const hasHikariName = nameRegex.test(message.content);
                 const settings = getChannelSettings(message.channelId);
                 const isChatterActive = settings?.chatter?.active || false;
                 if (isMention || hasHikariName || isReplyToBot || isChatterActive) {
@@ -190,10 +189,6 @@ module.exports = {
         const serverSettings = getServerSettings(message.guildId);
         const respondToEveryone = serverSettings.respondToEveryone || false;
         const isMention = message.mentions.has(client.user, { ignoreEveryone: true }) || (respondToEveryone && message.mentions.everyone);
-        const botName = config.botName || 'Hikari';
-        const escapedBotName = botName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const nameRegex = new RegExp(`\\b${escapedBotName}\\b`, 'i');
-        const hasHikariName = nameRegex.test(message.content);
         const isTargetingBot = Boolean(isMention || hasHikariName || isReplyToBot || !message.guildId);
         const trimmedRaw = (message.content || '').trim();
         const contentWithoutBotMention = trimmedRaw.replace(new RegExp(`^<@!?${client.user.id}>\\s*`), '').trim();

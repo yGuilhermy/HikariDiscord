@@ -70,6 +70,7 @@ This guide explains each entry in the `.env` file and Hikari's internal settings
 - **`OWNER_ID`**: Your Discord user ID (or multiple separated by commas). This ID is the bot owner, and only they can use commands with the Owner flag.
 - **`PREFIX`**: Prefix for legacy commands (if any). Code default: `_`.
 - **`BOT_NAME`**: The name Hikari will recognize as her own.
+- **`BOT_ALIASES`**: Comma-separated chat nicknames. Defaults to hik. Set an empty value to disable them. A nickname must appear as a standalone word.
 - **`REQUIRE_TOS`**: If `true`, new servers must accept the terms of use before using the bot. The shipped configuration and environment example enable this option.
 - **`LOG_EFFORT`**: `0` startup and essential events, `1` operational events without conversation data (default), `2` detailed diagnosis with credentials redacted.
 - **`AI_DB_READ`**: Enables reading and querying from the permanent autonomous AI database (`true`/`false`).
